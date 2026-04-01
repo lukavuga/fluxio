@@ -1,9 +1,11 @@
 package com.example.fluxio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -22,13 +24,11 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.net.Inet4Address
 import java.net.InetAddress
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
+import java.net.InetSocketAddress
+import java.net.Socket
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
@@ -72,7 +72,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         recyclerSaved.layoutManager = LinearLayoutManager(this)
 
-        // --- KONFIGURACIJA SWIPE (Standard + Custom) ---
         val toggle = ActionBarDrawerToggle(
             this, drawerLayout, toolbar,
             R.string.navigation_drawer_open, R.string.navigation_drawer_close
@@ -83,7 +82,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         navView.setNavigationItemSelectedListener(this)
         navView.setCheckedItem(R.id.nav_current)
 
-        // TUKAJ POKLIČEMO NOVO FUNKCIJO ZA KRETNJE ČEZ CEL ZASLON
         setupFullScreenSwipe()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -101,7 +99,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             currentScanResults.clear()
             currentDeviceAdapter.updateList(emptyList())
             btnSave.isEnabled = false
-            Toast.makeText(this, "Skeniram omrežje...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.scanning), Toast.LENGTH_SHORT).show()
             startSmartScan()
         }
 
@@ -112,27 +110,19 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         checkWifiConnection()
     }
 
-    // --- NOVA FUNKCIJA: Omogoča swipe čez cel zaslon ---
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupFullScreenSwipe() {
         val swipeListener = object : OnSwipeTouchListener(this) {
             override fun onSwipeRight() {
-                // Če potegnemo v desno, odpri meni
                 if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
                     drawerLayout.openDrawer(GravityCompat.START)
                 }
             }
-            override fun onSwipeLeft() {
-                // Opcijsko: Če je meni odprt in potegnemo v levo, ga zapri (navadno to dela že sistem)
-            }
         }
-
-        // Kretnje dodamo na glavne elemente, da primejo kjerkoli
         recyclerCurrent.setOnTouchListener(swipeListener)
         recyclerSaved.setOnTouchListener(swipeListener)
         layoutCurrent.setOnTouchListener(swipeListener)
         layoutSaved.setOnTouchListener(swipeListener)
-
-        // Tudi na prazen tekst, če ni omrežij
         findViewById<View>(R.id.txtNoSaved).setOnTouchListener(swipeListener)
     }
 
@@ -153,15 +143,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         drawerLayout.closeDrawer(GravityCompat.START)
         return true
     }
-
-    // ... (Ostala koda ostane ENAKA, kopirana iz prejšnjega odgovora) ...
-    // Zaradi preglednosti in omejitve dolžine spodaj kopiram ključne dele,
-    // ki morajo biti v datoteki (vse ostale funkcije za bazo, skeniranje itd. so iste).
-    // Prepričajte se, da imate v spodnjem delu še vedno funkcije:
-    // showSaveDialog, saveNetworkToDb, loadSavedNetworks, showDeleteNetworkDialog,
-    // showNetworkDetails, performRescanForNetwork, itd.
-
-    // --- BAZA IN DIALOGI ---
 
     private fun showSaveDialog() {
         if (currentScanResults.isEmpty()) {
@@ -234,7 +215,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun showDeleteNetworkDialog(network: SavedNetwork) {
         AlertDialog.Builder(this)
             .setTitle("Izbris omrežja")
-            .setMessage("Želite izbrisati '${network.name}'?")
+            .setMessage("Želite izbrisati \u0027${network.name}\u0027?")
             .setPositiveButton("Izbriši") { _, _ ->
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.networkDao().deleteNetwork(network)
@@ -244,8 +225,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .setNegativeButton("Prekliči", null)
             .show()
     }
-
-    // --- PRIKAZ PODROBNOSTI IN RESCAN ---
 
     private fun showNetworkDetails(network: SavedNetwork) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_list, null)
@@ -265,8 +244,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
 
         btnRescan.setOnClickListener {
-            btnRescan.isEnabled = false
-            btnRescan.text = "Iščem..."
             performRescanForNetwork(network, btnRescan, recyclerView)
         }
 
@@ -291,78 +268,97 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private suspend fun checkStatusOnly(devices: List<SavedDevice>, recyclerView: RecyclerView) {
         val updatedDevices = devices.map { device ->
             try {
-                if (InetAddress.getByName(device.ip).isReachable(200)) {
+                if (isHostReachable(device.ip, 500)) {
                     device.copy().apply { status = "Active" }
                 } else {
                     device
                 }
-            } catch (e: Exception) { device }
+            } catch (_: Exception) { device }
         }
         withContext(Dispatchers.Main) {
             (recyclerView.adapter as? DeviceAdapter)?.updateList(updatedDevices)
         }
     }
 
+    private fun isHostReachable(host: String, timeout: Int): Boolean {
+        try {
+            val addr = InetAddress.getByName(host)
+            if (addr.isReachable(timeout)) return true
+            
+            val commonPorts = intArrayOf(135, 445, 80)
+            for (port in commonPorts) {
+                try {
+                    val socket = Socket()
+                    socket.connect(InetSocketAddress(host, port), timeout / 2)
+                    socket.close()
+                    return true
+                } catch (_: Exception) { continue }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
     private fun performRescanForNetwork(network: SavedNetwork, btn: Button, recyclerView: RecyclerView) {
-        val executor = Executors.newFixedThreadPool(20)
+        btn.isEnabled = false
+        btn.text = getString(R.string.scanning)
 
         lifecycleScope.launch(Dispatchers.IO) {
             val myIp = getLocalIpAddress()
             if (myIp == null) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Niste povezani na WiFi!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.no_wifi), Toast.LENGTH_SHORT).show()
                     btn.isEnabled = true
-                    btn.text = "Išči nove naprave"
+                    btn.text = getString(R.string.search_new_devices)
                 }
                 return@launch
             }
 
-            val foundDevices = mutableListOf<SavedDevice>()
-            val subnet = myIp.substringBeforeLast(".")
+            val subnetPrefix = myIp.substringBeforeLast(".")
+            Log.d("Fluxio", "Skeniranje podomrežja: $subnetPrefix.0/24")
 
-            for (i in 1..254) {
-                val host = "$subnet.$i"
-                executor.execute {
+            val scanJobs = (1..254).map { i ->
+                async {
+                    val host = "$subnetPrefix.$i"
                     try {
-                        val addr = InetAddress.getByName(host)
-                        if (addr.isReachable(300)) {
-                            val name = addr.canonicalHostName ?: host
+                        if (isHostReachable(host, 600)) {
+                            val addr = InetAddress.getByName(host)
+                            val name = if (addr.canonicalHostName != host) addr.canonicalHostName else "Naprava $i"
                             val type = determineDeviceType(name, i)
-                            val device = SavedDevice(networkId = network.id, ip = host, name = name, type = type)
-                            device.status = "Active"
-                            synchronized(foundDevices) { foundDevices.add(device) }
-                        }
-                    } catch (_: Exception) {}
+
+                            SavedDevice(
+                                networkId = network.id,
+                                ip = host,
+                                name = name,
+                                type = type
+                            ).apply { status = "Active" }
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
             }
 
-            executor.shutdown()
-            try { executor.awaitTermination(15, TimeUnit.SECONDS) } catch (_: Exception) {}
+            val foundDevices = scanJobs.awaitAll().filterNotNull()
 
-            val newDevicesToAdd = mutableListOf<SavedDevice>()
-            val existingDevices = db.networkDao().getDevicesForNetwork(network.id).toMutableList()
-            val existingMap = existingDevices.associateBy { it.ip }
+            val existingDevices = db.networkDao().getDevicesForNetwork(network.id)
+            val existingIps = existingDevices.map { it.ip }.toSet()
+            val newDevices = foundDevices.filter { it.ip !in existingIps }
 
-            for (found in foundDevices) {
-                if (!existingMap.containsKey(found.ip)) {
-                    newDevicesToAdd.add(found)
-                }
-            }
-
-            if (newDevicesToAdd.isNotEmpty()) {
-                db.networkDao().insertDevices(newDevicesToAdd)
-                val newCount = existingDevices.size + newDevicesToAdd.size
-                val updatedNetwork = network.copy(deviceCount = newCount, timestamp = System.currentTimeMillis())
+            if (newDevices.isNotEmpty()) {
+                db.networkDao().insertDevices(newDevices)
+                val updatedNetwork = network.copy(
+                    deviceCount = existingDevices.size + newDevices.size,
+                    timestamp = System.currentTimeMillis()
+                )
                 db.networkDao().updateNetwork(updatedNetwork)
             }
 
-            refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
-
             withContext(Dispatchers.Main) {
-                val msg = if (newDevicesToAdd.isNotEmpty()) "Dodano: ${newDevicesToAdd.size} novih naprav." else "Ni novih naprav."
+                refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
+                val msg = if (newDevices.isNotEmpty()) "Najdeno ${newDevices.size} novih naprav." else getString(R.string.scan_finished)
                 Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                 btn.isEnabled = true
-                btn.text = "Išči nove naprave"
+                btn.text = getString(R.string.search_new_devices)
             }
         }
     }
@@ -390,8 +386,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
         }
     }
-
-    // --- UREJANJE IN BRISANJE ---
 
     private fun showEditDeviceDialog(device: SavedDevice, onComplete: () -> Unit) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
@@ -434,14 +428,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 .setPositiveButton("Da") { _, _ ->
                     lifecycleScope.launch(Dispatchers.IO) {
                         db.networkDao().deleteDevice(device)
-
                         val remainingDevices = db.networkDao().getDevicesForNetwork(device.networkId)
                         val network = db.networkDao().getNetworkById(device.networkId)
                         if (network != null) {
                             val updatedNetwork = network.copy(deviceCount = remainingDevices.size)
                             db.networkDao().updateNetwork(updatedNetwork)
                         }
-
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@MainActivity, "Izbrisano", Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
@@ -474,8 +466,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         AlertDialog.Builder(this).setView(dialogView).setPositiveButton("OK", null).show()
     }
 
-    // --- SKENIRANJE ---
-
     private fun checkWifiConnection() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork ?: return
@@ -486,7 +476,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun startSmartScan() {
-        val executor = Executors.newFixedThreadPool(20)
         lifecycleScope.launch(Dispatchers.IO) {
             val myIp = getLocalIpAddress() ?: run {
                 withContext(Dispatchers.Main) {
@@ -499,42 +488,37 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val me = SavedDevice(0, 0, myIp, "Moja Naprava", "PHONE").apply { status = "Active" }
             withContext(Dispatchers.Main) { addDeviceToUI(me) }
 
-            val subnet = myIp.substringBeforeLast(".")
-            for (i in 1..254) {
-                val host = "$subnet.$i"
-                if (host == myIp) continue
-
-                executor.execute {
+            val subnetPrefix = myIp.substringBeforeLast(".")
+            val scanJobs = (1..254).map { i ->
+                async {
+                    val host = "$subnetPrefix.$i"
+                    if (host == myIp) return@async null
                     try {
-                        val addr = InetAddress.getByName(host)
-                        if (addr.isReachable(300)) {
-                            val name = addr.canonicalHostName ?: host
+                        if (isHostReachable(host, 600)) {
+                            val addr = InetAddress.getByName(host)
+                            val name = if (addr.canonicalHostName != host) addr.canonicalHostName else "Naprava $i"
                             val type = determineDeviceType(name, i)
-                            val device = SavedDevice(0, 0, host, name, type).apply { status = "Active" }
-                            runOnUiThread { addDeviceToUI(device) }
-                        }
-                    } catch (_: Exception) {}
+                            SavedDevice(0, 0, host, name, type).apply { status = "Active" }
+                        } else null
+                    } catch (_: Exception) { null }
                 }
             }
 
-            executor.shutdown()
-            try { executor.awaitTermination(10, TimeUnit.SECONDS) } catch (e: InterruptedException) { e.printStackTrace() }
-
+            val results = scanJobs.awaitAll().filterNotNull()
             withContext(Dispatchers.Main) {
-                if (currentScanResults.isNotEmpty()) {
-                    btnSave.isEnabled = true
-                    Toast.makeText(this@MainActivity, "Skeniranje končano.", Toast.LENGTH_SHORT).show()
-                } else {
-                    btnSave.isEnabled = true
-                }
+                results.forEach { addDeviceToUI(it) }
+                btnSave.isEnabled = true
+                Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun addDeviceToUI(device: SavedDevice) {
         synchronized(currentScanResults) {
-            currentScanResults.add(device)
-            currentScanResults.sortBy { it.ip.substringAfterLast(".").toIntOrNull() ?: 0 }
+            if (currentScanResults.none { it.ip == device.ip }) {
+                currentScanResults.add(device)
+                currentScanResults.sortBy { it.ip.substringAfterLast(".").toIntOrNull() ?: 0 }
+            }
         }
         currentDeviceAdapter.updateList(currentScanResults)
     }
@@ -559,43 +543,30 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    // --- POMOŽNI RAZRED ZA SWIPE KRETNJE ---
     open class OnSwipeTouchListener(context: Context) : View.OnTouchListener {
-        private val gestureDetector = GestureDetector(context, GestureListener())
-
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            return gestureDetector.onTouchEvent(event)
-        }
-
-        private inner class GestureListener : GestureDetector.SimpleOnGestureListener() {
+        private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             private val SWIPE_THRESHOLD = 100
             private val SWIPE_VELOCITY_THRESHOLD = 100
 
-            override fun onDown(e: MotionEvent): Boolean {
-                return false // Pomembno: vrnemo false, da click evente še vedno primejo gumbi/listi
-            }
-
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float
-            ): Boolean {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
                 if (e1 == null) return false
-                val diffY = e2.y - e1.y
-                val diffX = e2.x - e1.x
-                if (abs(diffX) > abs(diffY)) {
-                    if (abs(diffX) > SWIPE_THRESHOLD && abs(velocityX) > SWIPE_VELOCITY_THRESHOLD) {
-                        if (diffX > 0) {
-                            onSwipeRight()
-                        } else {
-                            onSwipeLeft()
-                        }
-                        return true
-                    }
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (abs(dx) > abs(dy) && abs(dx) > SWIPE_THRESHOLD && abs(vx) > SWIPE_VELOCITY_THRESHOLD) {
+                    if (dx > 0) onSwipeRight() else onSwipeLeft()
+                    return true
                 }
                 return false
             }
+        })
+
+        @SuppressLint("ClickableViewAccessibility")
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            val handled = gestureDetector.onTouchEvent(event)
+            if (!handled && event.action == MotionEvent.ACTION_UP) {
+                v.performClick()
+            }
+            return handled
         }
 
         open fun onSwipeRight() {}

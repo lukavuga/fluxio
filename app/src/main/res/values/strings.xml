@@ -2,4 +2,8 @@
     <string name="app_name">Fluxio</string>
     <string name="navigation_drawer_open">Odpri meni</string>
     <string name="navigation_drawer_close">Zapri meni</string>
+    <string name="scanning">Skeniram...</string>
+    <string name="search_new_devices">Išči nove naprave</string>
+    <string name="no_wifi">Niste povezani na WiFi!</string>
+    <string name="scan_finished">Skeniranje končano.</string>
 </resources>
