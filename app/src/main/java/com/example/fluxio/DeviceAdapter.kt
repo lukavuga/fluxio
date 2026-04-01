@@ -27,9 +27,8 @@ class DeviceAdapter(
     override fun getItemCount(): Int = devices.size
 
     fun updateList(newDevices: List<SavedDevice>) {
-        val listCopy = ArrayList(newDevices)
         devices.clear()
-        devices.addAll(listCopy)
+        devices.addAll(newDevices)
         notifyDataSetChanged()
     }
 
@@ -44,26 +43,22 @@ class DeviceAdapter(
             deviceIp.text = device.ip
             deviceStatus.text = device.status
 
-            // 1. Nastavi barvo statusa (Active = Zelena, Inactive = Rdeča)
+            // 1. Set status color
             if (device.status == "Active") {
-                deviceStatus.setTextColor(Color.parseColor("#00E676")) // Neon zelena
+                deviceStatus.setTextColor(Color.parseColor("#00E676")) // Neon Green
             } else {
-                deviceStatus.setTextColor(Color.parseColor("#FF1744")) // Neon rdeča
+                deviceStatus.setTextColor(Color.parseColor("#FF1744")) // Neon Red
             }
 
-            // 2. Izberi pravo ikono
+            // 2. Select correct icon (Removed LAPTOP reference)
             val iconRes = when(device.type) {
                 "TV" -> R.drawable.tv
-                "PHONE" -> R.drawable.phone
-                "LAPTOP" -> R.drawable.laptop
+                "PHONE", "MOBILE" -> R.drawable.phone
                 "ROUTER" -> R.drawable.router
                 "PRINTER" -> R.drawable.printer
                 else -> R.drawable.computer
             }
             deviceIcon.setImageResource(iconRes)
-
-            // 3. POMEMBNO: Odstranili smo kodo "setColorFilter", ki je ikono prebarvala v modro kocko.
-            // Zdaj se bo prikazala originalna slika.
             deviceIcon.clearColorFilter()
         }
     }

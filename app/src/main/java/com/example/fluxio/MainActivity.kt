@@ -99,7 +99,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             currentScanResults.clear()
             currentDeviceAdapter.updateList(emptyList())
             btnSave.isEnabled = false
-            Toast.makeText(this, getString(R.string.scanning), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.scan_network_toast), Toast.LENGTH_SHORT).show()
             startSmartScan()
         }
 
@@ -131,12 +131,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             R.id.nav_current -> {
                 layoutCurrent.visibility = View.VISIBLE
                 layoutSaved.visibility = View.GONE
-                supportActionBar?.title = "Fluxio: Current"
+                supportActionBar?.title = getString(R.string.title_current)
             }
             R.id.nav_saved -> {
                 layoutCurrent.visibility = View.GONE
                 layoutSaved.visibility = View.VISIBLE
-                supportActionBar?.title = "Fluxio: Saved"
+                supportActionBar?.title = getString(R.string.title_saved)
                 loadSavedNetworks()
             }
         }
@@ -146,16 +146,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showSaveDialog() {
         if (currentScanResults.isEmpty()) {
-            Toast.makeText(this, "Ni naprav za shranjevanje!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No devices to save!", Toast.LENGTH_SHORT).show()
             return
         }
         val input = EditText(this)
-        input.hint = "Npr. Doma, Pisarna..."
+        input.hint = getString(R.string.hint_network_name)
         AlertDialog.Builder(this)
-            .setTitle("Shrani omrežje")
-            .setMessage("Vnesite ime za to omrežje:")
+            .setTitle(getString(R.string.save_network))
+            .setMessage(getString(R.string.enter_network_name))
             .setView(input)
-            .setPositiveButton("Shrani") { _, _ ->
+            .setPositiveButton(getString(R.string.save)) { _, _ ->
                 val name = input.text.toString()
                 if (name.isNotEmpty()) {
                     lifecycleScope.launch(Dispatchers.IO) {
@@ -164,13 +164,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             saveNetworkToDb(name)
                         } else {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@MainActivity, "Ime že obstaja!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@MainActivity, getString(R.string.name_already_exists), Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                 }
             }
-            .setNegativeButton("Prekliči", null)
+            .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }
 
@@ -188,7 +188,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         db.networkDao().insertDevices(devicesToSave)
 
         withContext(Dispatchers.Main) {
-            Toast.makeText(this@MainActivity, "Shranjeno!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, getString(R.string.saved), Toast.LENGTH_SHORT).show()
             btnSave.isEnabled = false
         }
     }
@@ -214,15 +214,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showDeleteNetworkDialog(network: SavedNetwork) {
         AlertDialog.Builder(this)
-            .setTitle("Izbris omrežja")
-            .setMessage("Želite izbrisati \u0027${network.name}\u0027?")
-            .setPositiveButton("Izbriši") { _, _ ->
+            .setTitle(getString(R.string.delete_network))
+            .setMessage(getString(R.string.confirm_delete_network, network.name))
+            .setPositiveButton(getString(R.string.delete)) { _, _ ->
                 lifecycleScope.launch(Dispatchers.IO) {
                     db.networkDao().deleteNetwork(network)
                     withContext(Dispatchers.Main) { loadSavedNetworks() }
                 }
             }
-            .setNegativeButton("Prekliči", null)
+            .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }
 
@@ -234,9 +234,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         recyclerView.layoutManager = GridLayoutManager(this, 2)
 
         val detailsDialog = AlertDialog.Builder(this)
-            .setTitle("Naprave: ${network.name}")
+            .setTitle("${getString(R.string.devices)}: ${network.name}")
             .setView(dialogView)
-            .setPositiveButton("Zapri", null)
+            .setPositiveButton(getString(R.string.close), null)
             .create()
 
         detailsDialog.setOnDismissListener {
@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         lifecycleScope.launch(Dispatchers.IO) {
             val dbDevices = db.networkDao().getDevicesForNetwork(network.id)
-            val devices = dbDevices.map { it.apply { status = "Inactive" } }.toMutableList()
+            val devices = dbDevices.map { it.apply { status = getString(R.string.inactive) } }.toMutableList()
 
             withContext(Dispatchers.Main) {
                 val adapter = DeviceAdapter(devices) { device ->
@@ -269,7 +269,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val updatedDevices = devices.map { device ->
             try {
                 if (isHostReachable(device.ip, 500)) {
-                    device.copy().apply { status = "Active" }
+                    device.copy().apply { status = getString(R.string.active) }
                 } else {
                     device
                 }
@@ -314,7 +314,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
 
             val subnetPrefix = myIp.substringBeforeLast(".")
-            Log.d("Fluxio", "Skeniranje podomrežja: $subnetPrefix.0/24")
+            Log.d("Fluxio", "Scanning subnet: $subnetPrefix.0/24")
 
             val scanJobs = (1..254).map { i ->
                 async {
@@ -322,17 +322,18 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     try {
                         if (isHostReachable(host, 600)) {
                             val addr = InetAddress.getByName(host)
-                            val name = if (addr.canonicalHostName != host) addr.canonicalHostName else "Naprava $i"
-                            val type = determineDeviceType(name, i)
+                            val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
+                            val name = formatDeviceName(rawName, host)
+                            val type = determineDeviceType(name, host)
 
                             SavedDevice(
                                 networkId = network.id,
                                 ip = host,
                                 name = name,
                                 type = type
-                            ).apply { status = "Active" }
+                            ).apply { status = getString(R.string.active) }
                         } else null
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
                         null
                     }
                 }
@@ -355,7 +356,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
             withContext(Dispatchers.Main) {
                 refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
-                val msg = if (newDevices.isNotEmpty()) "Najdeno ${newDevices.size} novih naprav." else getString(R.string.scan_finished)
+                val msg = if (newDevices.isNotEmpty()) getString(R.string.new_devices_found, newDevices.size) else getString(R.string.scan_finished)
                 Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
                 btn.isEnabled = true
                 btn.text = getString(R.string.search_new_devices)
@@ -367,9 +368,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val allDevices = db.networkDao().getDevicesForNetwork(networkId)
         val uiDevices = allDevices.map { device ->
             if (activeIps.contains(device.ip)) {
-                device.apply { status = "Active" }
+                device.apply { status = getString(R.string.active) }
             } else {
-                device.apply { status = "Inactive" }
+                device.apply { status = getString(R.string.inactive) }
             }
         }
         withContext(Dispatchers.Main) {
@@ -380,7 +381,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun refreshDeviceList(networkId: Int, recyclerView: RecyclerView) {
         lifecycleScope.launch(Dispatchers.IO) {
             val devices = db.networkDao().getDevicesForNetwork(networkId)
-            devices.forEach { it.status = "Inactive" }
+            devices.forEach { it.status = getString(R.string.inactive) }
             withContext(Dispatchers.Main) {
                 (recyclerView.adapter as? DeviceAdapter)?.updateList(devices)
             }
@@ -396,7 +397,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         editName.setText(device.name)
         editIp.setText(device.ip)
 
-        val types = arrayOf("PC", "LAPTOP", "PHONE", "TV", "ROUTER", "PRINTER")
+        val types = arrayOf("PC", "PHONE", "TV", "ROUTER", "PRINTER", "IOT")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, types)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
@@ -414,7 +415,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             lifecycleScope.launch(Dispatchers.IO) {
                 db.networkDao().updateDevice(updated)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Posodobljeno", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.updated), Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                     onComplete()
                 }
@@ -423,9 +424,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         dialogView.findViewById<Button>(R.id.btnDeleteDevice).setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("Izbris naprave")
-                .setMessage("Res želite izbrisati to napravo?")
-                .setPositiveButton("Da") { _, _ ->
+                .setTitle(getString(R.string.delete_device))
+                .setMessage(getString(R.string.confirm_delete_device))
+                .setPositiveButton(getString(R.string.yes)) { _, _ ->
                     lifecycleScope.launch(Dispatchers.IO) {
                         db.networkDao().deleteDevice(device)
                         val remainingDevices = db.networkDao().getDevicesForNetwork(device.networkId)
@@ -435,13 +436,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             db.networkDao().updateNetwork(updatedNetwork)
                         }
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "Izbrisano", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, getString(R.string.deleted), Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                             onComplete()
                         }
                     }
                 }
-                .setNegativeButton("Ne", null)
+                .setNegativeButton(getString(R.string.no), null)
                 .show()
         }
         dialog.show()
@@ -456,14 +457,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         val iconRes = when (device.type) {
             "TV" -> R.drawable.tv
-            "PHONE" -> R.drawable.phone
-            "LAPTOP" -> R.drawable.laptop
+            "PHONE", "MOBILE" -> R.drawable.phone
             "ROUTER" -> R.drawable.router
             "PRINTER" -> R.drawable.printer
             else -> R.drawable.computer
         }
         dialogView.findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
-        AlertDialog.Builder(this).setView(dialogView).setPositiveButton("OK", null).show()
+        AlertDialog.Builder(this).setView(dialogView).setPositiveButton(getString(R.string.ok), null).show()
     }
 
     private fun checkWifiConnection() {
@@ -471,7 +471,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val network = cm.activeNetwork ?: return
         val caps = cm.getNetworkCapabilities(network)
         if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            Toast.makeText(this, "Povežite se na WiFi!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.no_wifi), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -479,13 +479,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         lifecycleScope.launch(Dispatchers.IO) {
             val myIp = getLocalIpAddress() ?: run {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Ni IP naslova!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
                     btnSave.isEnabled = true
                 }
                 return@launch
             }
 
-            val me = SavedDevice(0, 0, myIp, "Moja Naprava", "PHONE").apply { status = "Active" }
+            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE").apply { status = getString(R.string.active) }
             withContext(Dispatchers.Main) { addDeviceToUI(me) }
 
             val subnetPrefix = myIp.substringBeforeLast(".")
@@ -496,9 +496,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     try {
                         if (isHostReachable(host, 600)) {
                             val addr = InetAddress.getByName(host)
-                            val name = if (addr.canonicalHostName != host) addr.canonicalHostName else "Naprava $i"
-                            val type = determineDeviceType(name, i)
-                            SavedDevice(0, 0, host, name, type).apply { status = "Active" }
+                            val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
+                            val name = formatDeviceName(rawName, host)
+                            val type = determineDeviceType(name, host)
+                            SavedDevice(0, 0, host, name, type).apply { status = getString(R.string.active) }
                         } else null
                     } catch (_: Exception) { null }
                 }
@@ -531,14 +532,35 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }?.address?.hostAddress
     }
 
-    private fun determineDeviceType(name: String, lastOctet: Int): String {
+    private fun formatDeviceName(hostname: String, ip: String): String {
+        if (hostname == ip || hostname.equals("unknown", ignoreCase = true)) {
+            return "Generic Device"
+        }
+
+        // Clean common local domain suffixes
+        val cleanName = hostname
+            .lowercase()
+            .removeSuffix(".local")
+            .removeSuffix(".home")
+            .removeSuffix(".lan")
+            .removeSuffix(".modem")
+            .removeSuffix(".gateway")
+            .removeSuffix(".broadband")
+
+        return cleanName.replaceFirstChar { it.uppercase() }
+    }
+
+    private fun determineDeviceType(name: String, ip: String): String {
         val h = name.lowercase()
+        val lastOctet = ip.substringAfterLast(".").toIntOrNull() ?: 0
+
         return when {
-            lastOctet == 1 -> "ROUTER"
-            h.contains("tv") || h.contains("bravia") -> "TV"
-            h.contains("phone") || h.contains("android") || h.contains("pixel") -> "PHONE"
-            h.contains("print") -> "PRINTER"
-            h.contains("laptop") -> "LAPTOP"
+            lastOctet == 1 || h.contains("gateway") || h.contains("router") || h.contains("modem") -> "ROUTER"
+            h.contains("tv") || h.contains("bravia") || h.contains("chromecast") || h.contains("roku") -> "TV"
+            h.contains("phone") || h.contains("android") || h.contains("pixel") || h.contains("iphone") || h.contains("mobile") -> "PHONE"
+            h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> "PRINTER"
+            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> "PC"
+            h.contains("cam") || h.contains("nest") || h.contains("hub") || h.contains("sonos") || h.contains("hue") -> "IOT"
             else -> "PC"
         }
     }
