@@ -24,7 +24,8 @@ data class SavedDevice(
     val networkId: Int,
     val ip: String,
     val name: String,
-    val type: String
+    val type: String,
+    val originalName: String // Persistent identifier (hostname at first discovery)
 ) {
     @Ignore var status: String = "Inactive"
 }
@@ -61,11 +62,14 @@ interface NetworkDao {
     @Query("SELECT * FROM networks WHERE id = :id")
     suspend fun getNetworkById(id: Int): SavedNetwork?
 
-    @Query("SELECT * FROM devices WHERE networkId = :netId AND name = :deviceName LIMIT 1")
-    suspend fun getDeviceByName(netId: Int, deviceName: String): SavedDevice?
+    @Query("SELECT * FROM devices WHERE networkId = :netId AND originalName = :originalName LIMIT 1")
+    suspend fun getDeviceByOriginalName(netId: Int, originalName: String): SavedDevice?
+
+    @Query("UPDATE devices SET ip = :newIp WHERE networkId = :netId AND originalName = :originalName")
+    suspend fun updateDeviceIpByOriginalName(netId: Int, originalName: String, newIp: String)
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 1)
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 2) // Incremented version for schema change
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 
@@ -79,7 +83,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "fluxio_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration() // Simplest way for schema change during development
+                .build()
                 INSTANCE = instance
                 instance
             }

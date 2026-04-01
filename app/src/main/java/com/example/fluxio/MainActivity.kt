@@ -67,8 +67,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             showDeviceInfoDialog(device)
         }
 
-        recyclerCurrent.layoutManager = GridLayoutManager(this, 2)
-        recyclerCurrent.adapter = currentDeviceAdapter
+        recyclerCurrent.apply {
+            layoutManager = GridLayoutManager(this@MainActivity, 2)
+            adapter = currentDeviceAdapter
+        }
 
         recyclerSaved.layoutManager = LinearLayoutManager(this)
 
@@ -149,8 +151,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             Toast.makeText(this, "No devices to save!", Toast.LENGTH_SHORT).show()
             return
         }
-        val input = EditText(this)
-        input.hint = getString(R.string.hint_network_name)
+        val input = EditText(this).apply {
+            hint = getString(R.string.hint_network_name)
+        }
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.save_network))
             .setMessage(getString(R.string.enter_network_name))
@@ -266,14 +269,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private suspend fun checkStatusOnly(devices: List<SavedDevice>, recyclerView: RecyclerView) {
-        val updatedDevices = devices.map { device ->
-            try {
+        val updatedDevices = withContext(Dispatchers.IO) {
+            devices.map { device ->
                 if (isHostReachable(device.ip, 500)) {
                     device.copy().apply { status = getString(R.string.active) }
                 } else {
                     device
                 }
-            } catch (_: Exception) { device }
+            }
         }
         withContext(Dispatchers.Main) {
             (recyclerView.adapter as? DeviceAdapter)?.updateList(updatedDevices)
@@ -281,97 +284,94 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun isHostReachable(host: String, timeout: Int): Boolean {
-        try {
+        return try {
             val addr = InetAddress.getByName(host)
             if (addr.isReachable(timeout)) return true
             
+            // Fallback: Try common ports
             val commonPorts = intArrayOf(135, 445, 80)
-            for (port in commonPorts) {
+            commonPorts.any { port ->
                 try {
-                    val socket = Socket()
-                    socket.connect(InetSocketAddress(host, port), timeout / 2)
-                    socket.close()
-                    return true
-                } catch (_: Exception) { continue }
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress(host, port), timeout / 2)
+                        true
+                    }
+                } catch (_: Exception) { false }
             }
-        } catch (_: Exception) {}
-        return false
+        } catch (_: Exception) { false }
     }
 
     private fun performRescanForNetwork(network: SavedNetwork, btn: Button, recyclerView: RecyclerView) {
         btn.isEnabled = false
         btn.text = getString(R.string.scanning)
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            val myIp = getLocalIpAddress()
+        lifecycleScope.launch {
+            val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() }
             if (myIp == null) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, getString(R.string.no_wifi), Toast.LENGTH_SHORT).show()
-                    btn.isEnabled = true
-                    btn.text = getString(R.string.search_new_devices)
-                }
+                Toast.makeText(this@MainActivity, getString(R.string.no_wifi), Toast.LENGTH_SHORT).show()
+                btn.isEnabled = true
+                btn.text = getString(R.string.search_new_devices)
                 return@launch
             }
 
             val subnetPrefix = myIp.substringBeforeLast(".")
-            Log.d("Fluxio", "Scanning subnet: $subnetPrefix.0/24")
+            
+            val foundDevices = withContext(Dispatchers.IO) {
+                (1..254).map { i ->
+                    async {
+                        val host = "$subnetPrefix.$i"
+                        try {
+                            if (isHostReachable(host, 600)) {
+                                val addr = InetAddress.getByName(host)
+                                val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
+                                val name = formatDeviceName(rawName, host)
+                                val type = identifyDeviceType(name, host)
 
-            val scanJobs = (1..254).map { i ->
-                async {
-                    val host = "$subnetPrefix.$i"
-                    try {
-                        if (isHostReachable(host, 600)) {
-                            val addr = InetAddress.getByName(host)
-                            val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
-                            val name = formatDeviceName(rawName, host)
-                            val type = identifyDeviceType(name, host)
+                                SavedDevice(
+                                    networkId = network.id,
+                                    ip = host,
+                                    name = name,
+                                    type = type,
+                                    originalName = name
+                                ).apply { status = getString(R.string.active) }
+                            } else null
+                        } catch (_: Exception) { null }
+                    }
+                }.awaitAll().filterNotNull()
+            }
 
-                            SavedDevice(
-                                networkId = network.id,
-                                ip = host,
-                                name = name,
-                                type = type
-                            ).apply { status = getString(R.string.active) }
-                        } else null
-                    } catch (e: Exception) {
-                        null
+            withContext(Dispatchers.IO) {
+                for (found in foundDevices) {
+                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
+                    if (existing != null) {
+                        if (existing.ip != found.ip) {
+                            db.networkDao().updateDeviceIpByOriginalName(network.id, found.originalName, found.ip)
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@MainActivity, "Updated IP for ${existing.name}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } else {
+                        db.networkDao().insertDevices(listOf(found))
                     }
                 }
-            }
 
-            val foundDevices = scanJobs.awaitAll().filterNotNull()
-
-            val existingDevices = db.networkDao().getDevicesForNetwork(network.id)
-            val existingIps = existingDevices.map { it.ip }.toSet()
-            val newDevices = foundDevices.filter { it.ip !in existingIps }
-
-            if (newDevices.isNotEmpty()) {
-                db.networkDao().insertDevices(newDevices)
-                val updatedNetwork = network.copy(
-                    deviceCount = existingDevices.size + newDevices.size,
+                val updatedDevices = db.networkDao().getDevicesForNetwork(network.id)
+                db.networkDao().updateNetwork(network.copy(
+                    deviceCount = updatedDevices.size,
                     timestamp = System.currentTimeMillis()
-                )
-                db.networkDao().updateNetwork(updatedNetwork)
+                ))
             }
 
-            withContext(Dispatchers.Main) {
-                refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
-                val msg = if (newDevices.isNotEmpty()) getString(R.string.new_devices_found, newDevices.size) else getString(R.string.scan_finished)
-                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
-                btn.isEnabled = true
-                btn.text = getString(R.string.search_new_devices)
-            }
+            refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
+            btn.isEnabled = true
+            btn.text = getString(R.string.search_new_devices)
         }
     }
 
     private suspend fun refreshDeviceListWithStatus(networkId: Int, recyclerView: RecyclerView, activeIps: List<String>) {
-        val allDevices = db.networkDao().getDevicesForNetwork(networkId)
+        val allDevices = withContext(Dispatchers.IO) { db.networkDao().getDevicesForNetwork(networkId) }
         val uiDevices = allDevices.map { device ->
-            if (activeIps.contains(device.ip)) {
-                device.apply { status = getString(R.string.active) }
-            } else {
-                device.apply { status = getString(R.string.inactive) }
-            }
+            device.apply { status = if (activeIps.contains(device.ip)) getString(R.string.active) else getString(R.string.inactive) }
         }
         withContext(Dispatchers.Main) {
             (recyclerView.adapter as? DeviceAdapter)?.updateList(uiDevices)
@@ -395,7 +395,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
 
         editName.setText(device.name)
-        editIp.setText(device.ip)
+        editIp.apply {
+            setText(device.ip)
+            isFocusable = false
+            isClickable = false
+        }
 
         val types = arrayOf("PC", "PHONE", "TV", "ROUTER", "PRINTER", "IOT")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, types)
@@ -409,7 +413,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         dialogView.findViewById<Button>(R.id.btnSaveChanges).setOnClickListener {
             val updated = device.copy(
                 name = editName.text.toString(),
-                ip = editIp.text.toString(),
                 type = spinner.selectedItem.toString()
             )
             lifecycleScope.launch(Dispatchers.IO) {
@@ -430,10 +433,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     lifecycleScope.launch(Dispatchers.IO) {
                         db.networkDao().deleteDevice(device)
                         val remainingDevices = db.networkDao().getDevicesForNetwork(device.networkId)
-                        val network = db.networkDao().getNetworkById(device.networkId)
-                        if (network != null) {
-                            val updatedNetwork = network.copy(deviceCount = remainingDevices.size)
-                            db.networkDao().updateNetwork(updatedNetwork)
+                        db.networkDao().getNetworkById(device.networkId)?.let { network ->
+                            db.networkDao().updateNetwork(network.copy(deviceCount = remainingDevices.size))
                         }
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@MainActivity, getString(R.string.deleted), Toast.LENGTH_SHORT).show()
@@ -450,19 +451,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showDeviceInfoDialog(device: SavedDevice) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_info, null)
-        dialogView.findViewById<TextView>(R.id.txtDeviceNameDialog).text = device.name
-        dialogView.findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ip
-        dialogView.findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type
-        dialogView.findViewById<TextView>(R.id.txtDeviceStatusDialog).text = device.status
-
-        val iconRes = when (device.type) {
-            "TV" -> R.drawable.tv
-            "PHONE", "MOBILE" -> R.drawable.phone
-            "ROUTER" -> R.drawable.router
-            "PRINTER" -> R.drawable.printer
-            else -> R.drawable.computer
+        dialogView.apply {
+            findViewById<TextView>(R.id.txtDeviceNameDialog).text = device.name
+            findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ip
+            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type
+            findViewById<TextView>(R.id.txtDeviceStatusDialog).text = device.status
+            val iconRes = when (device.type) {
+                "TV" -> R.drawable.tv
+                "PHONE", "MOBILE" -> R.drawable.phone
+                "ROUTER" -> R.drawable.router
+                "PRINTER" -> R.drawable.printer
+                else -> R.drawable.computer
+            }
+            findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
         }
-        dialogView.findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
         AlertDialog.Builder(this).setView(dialogView).setPositiveButton(getString(R.string.ok), null).show()
     }
 
@@ -476,41 +478,38 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun startSmartScan() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val myIp = getLocalIpAddress() ?: run {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
-                    btnSave.isEnabled = true
-                }
+        lifecycleScope.launch {
+            val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() } ?: run {
+                Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
+                btnSave.isEnabled = true
                 return@launch
             }
 
-            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE").apply { status = getString(R.string.active) }
-            withContext(Dispatchers.Main) { addDeviceToUI(me) }
+            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE", "MY_DEVICE").apply { status = getString(R.string.active) }
+            addDeviceToUI(me)
 
             val subnetPrefix = myIp.substringBeforeLast(".")
-            val scanJobs = (1..254).map { i ->
-                async {
-                    val host = "$subnetPrefix.$i"
-                    if (host == myIp) return@async null
-                    try {
-                        if (isHostReachable(host, 600)) {
-                            val addr = InetAddress.getByName(host)
-                            val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
-                            val name = formatDeviceName(rawName, host)
-                            val type = identifyDeviceType(name, host)
-                            SavedDevice(0, 0, host, name, type).apply { status = getString(R.string.active) }
-                        } else null
-                    } catch (_: Exception) { null }
-                }
+            val results = withContext(Dispatchers.IO) {
+                (1..254).map { i ->
+                    async {
+                        val host = "$subnetPrefix.$i"
+                        if (host == myIp) return@async null
+                        try {
+                            if (isHostReachable(host, 600)) {
+                                val addr = InetAddress.getByName(host)
+                                val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
+                                val name = formatDeviceName(rawName, host)
+                                val type = identifyDeviceType(name, host)
+                                SavedDevice(0, 0, host, name, type, name).apply { status = getString(R.string.active) }
+                            } else null
+                        } catch (_: Exception) { null }
+                    }
+                }.awaitAll().filterNotNull()
             }
 
-            val results = scanJobs.awaitAll().filterNotNull()
-            withContext(Dispatchers.Main) {
-                results.forEach { addDeviceToUI(it) }
-                btnSave.isEnabled = true
-                Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
-            }
+            results.forEach { addDeviceToUI(it) }
+            btnSave.isEnabled = true
+            Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -537,7 +536,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             return "Generic Device"
         }
 
-        // Clean common local domain suffixes
         val cleanName = hostname
             .lowercase()
             .removeSuffix(".local")
@@ -568,29 +566,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             "tecno", "infinix", "itel", "tcl", "alcatel", "blackberry", "micromax", "lava", "karbonn", "intex", "cherry mobile", "advan", "mito", "blu", "jolla", "general mobile", "pantech", "microsoft", "lumia", "surface duo",
             "sony ericsson", "siemens", "benq", "gionee", "vertu", "okapia", "nanjing bird",
             "phone", "handset", "mobile", "android",
-            // Smartwatch keywords
             "sm-r", "applewatch", "watch", "wearable", "smartband", "fenix", "forerunner", "venu", "versa", "sense", "charge", "amazfit", "ticwatch", "suunto", "polar", "connected", "summit", "withings"
         )
 
         return when {
-            // Infrastructure logic
             lastOctet == 1 || h.contains("gateway") || h.contains("router") || h.contains("modem") -> "ROUTER"
-            
-            // Multimedia logic
             h.contains("tv") || h.contains("bravia") || h.contains("chromecast") || h.contains("roku") -> "TV"
-            
-            // Mobile & Wearable logic (Prioritized before PC)
             mobileKeywords.any { h.contains(it) } -> "PHONE"
-            
-            // Peripheral logic
             h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> "PRINTER"
-            
-            // Smart Home / IoT logic
             h.contains("cam") || h.contains("nest") || h.contains("hub") || h.contains("sonos") || h.contains("hue") -> "IOT"
-            
-            // Default to PC if other keywords match workstation patterns
             h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> "PC"
-
             else -> "PC"
         }
     }
