@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <group android:checkableBehavior="single">
+        <item
+            android:id="@+id/nav_current"
+            android:icon="@android:drawable/ic_menu_search"
+            android:title="Current Network" />
+        <item
+            android:id="@+id/nav_saved"
+            android:icon="@android:drawable/ic_menu_save"
+            android:title="Saved Networks" />
+    </group>
+</menu>

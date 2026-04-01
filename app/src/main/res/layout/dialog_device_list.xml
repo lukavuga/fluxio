@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <Button
+        android:id="@+id/btnRescanNetwork"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Išči nove naprave"
+        android:backgroundTint="#2196F3"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="10dp"/>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerDeviceList"
+        android:layout_width="match_parent"
+        android:layout_height="400dp"
+        android:padding="5dp"
+        android:clipToPadding="false"/>
+</LinearLayout>

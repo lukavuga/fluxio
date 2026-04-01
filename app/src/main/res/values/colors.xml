@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="flux_background">#121212</color>
+    <color name="flux_card">#1E1E1E</color>
+    <color name="flux_toolbar">#000000</color>
+
+    <color name="flux_neon_blue">#00E5FF</color>
+    <color name="flux_neon_green">#00E676</color> <color name="flux_neon_red">#FF1744</color>   <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B0B0</color>
+
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
