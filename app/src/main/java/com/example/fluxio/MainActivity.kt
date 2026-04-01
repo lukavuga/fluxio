@@ -324,7 +324,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             val addr = InetAddress.getByName(host)
                             val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
                             val name = formatDeviceName(rawName, host)
-                            val type = determineDeviceType(name, host)
+                            val type = identifyDeviceType(name, host)
 
                             SavedDevice(
                                 networkId = network.id,
@@ -498,7 +498,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             val addr = InetAddress.getByName(host)
                             val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
                             val name = formatDeviceName(rawName, host)
-                            val type = determineDeviceType(name, host)
+                            val type = identifyDeviceType(name, host)
                             SavedDevice(0, 0, host, name, type).apply { status = getString(R.string.active) }
                         } else null
                     } catch (_: Exception) { null }
@@ -550,17 +550,47 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         return cleanName.replaceFirstChar { it.uppercase() }
     }
 
-    private fun determineDeviceType(name: String, ip: String): String {
-        val h = name.lowercase()
+    private fun identifyDeviceType(hostname: String, ip: String): String {
+        val h = hostname.lowercase()
+            .removeSuffix(".local")
+            .removeSuffix(".home")
+            .removeSuffix(".lan")
+            .removeSuffix(".modem")
+            .removeSuffix(".gateway")
+            .removeSuffix(".broadband")
+
         val lastOctet = ip.substringAfterLast(".").toIntOrNull() ?: 0
 
+        val mobileKeywords = listOf(
+            "samsung", "galaxy", "iphone", "apple", "pixel", "google",
+            "xiaomi", "mi", "redmi", "poco", "vivo", "iqoo", "oppo", "realme", "oneplus", "huawei", "mate", "honor", "meizu",
+            "motorola", "moto", "sony", "xperia", "lg", "htc", "asus", "zenfone", "rog", "lenovo", "legion", "zte", "nubia", "axon", "nothing", "cmf", "dizo", "fairphone", "nokia",
+            "tecno", "infinix", "itel", "tcl", "alcatel", "blackberry", "micromax", "lava", "karbonn", "intex", "cherry mobile", "advan", "mito", "blu", "jolla", "general mobile", "pantech", "microsoft", "lumia", "surface duo",
+            "sony ericsson", "siemens", "benq", "gionee", "vertu", "okapia", "nanjing bird",
+            "phone", "handset", "mobile", "android",
+            // Smartwatch keywords
+            "sm-r", "applewatch", "watch", "wearable", "smartband", "fenix", "forerunner", "venu", "versa", "sense", "charge", "amazfit", "ticwatch", "suunto", "polar", "connected", "summit", "withings"
+        )
+
         return when {
+            // Infrastructure logic
             lastOctet == 1 || h.contains("gateway") || h.contains("router") || h.contains("modem") -> "ROUTER"
+            
+            // Multimedia logic
             h.contains("tv") || h.contains("bravia") || h.contains("chromecast") || h.contains("roku") -> "TV"
-            h.contains("phone") || h.contains("android") || h.contains("pixel") || h.contains("iphone") || h.contains("mobile") -> "PHONE"
+            
+            // Mobile & Wearable logic (Prioritized before PC)
+            mobileKeywords.any { h.contains(it) } -> "PHONE"
+            
+            // Peripheral logic
             h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> "PRINTER"
-            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> "PC"
+            
+            // Smart Home / IoT logic
             h.contains("cam") || h.contains("nest") || h.contains("hub") || h.contains("sonos") || h.contains("hue") -> "IOT"
+            
+            // Default to PC if other keywords match workstation patterns
+            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> "PC"
+
             else -> "PC"
         }
     }

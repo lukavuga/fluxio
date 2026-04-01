@@ -55,12 +55,14 @@ interface NetworkDao {
     @Delete
     suspend fun deleteDevice(device: SavedDevice)
 
-    // --- NOVO: Za posodabljanje števca naprav ---
     @Update
     suspend fun updateNetwork(network: SavedNetwork)
 
     @Query("SELECT * FROM networks WHERE id = :id")
     suspend fun getNetworkById(id: Int): SavedNetwork?
+
+    @Query("SELECT * FROM devices WHERE networkId = :netId AND name = :deviceName LIMIT 1")
+    suspend fun getDeviceByName(netId: Int, deviceName: String): SavedDevice?
 }
 
 @Database(entities = [SavedNetwork::class, SavedDevice::class], version = 1)
