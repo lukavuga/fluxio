@@ -24,6 +24,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.*
+import java.io.BufferedReader
+import java.io.FileReader
 import java.net.*
 import kotlin.math.abs
 
@@ -393,8 +395,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     ip = host,
                                     name = name,
                                     type = type,
-                                    originalName = name,
-                                    macAddress = mac!!
+                                    originalName = if (rawName != "unknown") rawName else host,
+                                    macAddress = mac
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -406,11 +408,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 for (found in foundDevices) {
                     val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
                     if (existing != null) {
-                        if (existing.ip != found.ip || existing.macAddress != found.macAddress) {
-                            db.networkDao().updateDevice(existing.copy(ip = found.ip, macAddress = found.macAddress))
-                        }
+                        // Keep user set name if changed, but update IP/MAC
+                        val updated = existing.copy(
+                            ip = found.ip,
+                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress
+                        )
+                        db.networkDao().updateDevice(updated)
                     } else {
-                        db.networkDao().insertDevices(listOf(found))
+                        db.networkDao().upsertDevice(found)
                     }
                 }
 
@@ -428,12 +433,29 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun getMacFromArp(ip: String): String? {
-        return try {
+        try {
             val address = InetAddress.getByName(ip)
+            // Try NetworkInterface first (usually works for local device)
             val networkInterface = NetworkInterface.getByInetAddress(address)
-            val mac = networkInterface?.hardwareAddress
-            mac?.joinToString(":") { "%02X".format(it) }
-        } catch (_: Exception) { null }
+            if (networkInterface != null) {
+                val mac = networkInterface.hardwareAddress
+                if (mac != null) return mac.joinToString(":") { "%02X".format(it) }
+            }
+
+            // Fallback: Read ARP table (might be restricted on Android 10+)
+            val reader = BufferedReader(FileReader("/proc/net/arp"))
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                if (line!!.contains(ip)) {
+                    val parts = line!!.split("\\s+".toRegex())
+                    if (parts.size >= 4 && parts[3].matches("..:..:..:..:..:..".toRegex())) {
+                        return parts[3].uppercase()
+                    }
+                }
+            }
+            reader.close()
+        } catch (_: Exception) { }
+        return null
     }
 
     private suspend fun refreshDeviceListWithStatus(networkId: Long, recyclerView: RecyclerView, activeIps: List<String>) {
@@ -572,7 +594,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                 val name = formatDeviceName(rawName, host)
                                 val type = identifyDeviceType(name, host)
                                 val mac = getMacFromArp(host)
-                                SavedDevice(0, 0, host, name, type, name, mac ?: "").apply { status = getString(R.string.active) }
+                                SavedDevice(
+                                    networkId = 0,
+                                    ip = host,
+                                    name = name,
+                                    type = type,
+                                    originalName = if (rawName != "unknown") rawName else host,
+                                    macAddress = mac
+                                ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
                     }

@@ -31,8 +31,8 @@ data class SavedDevice(
     val ip: String,
     val name: String,
     val type: String,
-    val originalName: String,
-    val macAddress: String,
+    val originalName: String, // Persistent identifier (hostname at first discovery)
+    val macAddress: String?, // Nullable to handle discovery failures
     val lastSeen: Long = System.currentTimeMillis(),
     val isOnline: Boolean = false
 ) {
@@ -87,7 +87,7 @@ interface NetworkDao {
     suspend fun markAllOffline(netId: Long, online: Boolean = false, timestamp: Long = System.currentTimeMillis())
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 6)
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 7) // Incremented for nullable mac
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 
