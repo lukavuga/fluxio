@@ -52,6 +52,8 @@ class DeviceAdapter(
             val context = itemView.context
             deviceName.text = device.name
             deviceIp.text = device.ip
+            
+            // Display MAC address or "Unknown"
             deviceMac.text = if (!device.macAddress.isNullOrBlank()) "MAC: ${device.macAddress}" else "MAC: Unknown"
             deviceStatus.text = device.status
 

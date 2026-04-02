@@ -406,18 +406,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
             withContext(Dispatchers.IO) {
                 for (found in foundDevices) {
-                    // Try matching by MAC first, then OriginalName
-                    val existing = if (!found.macAddress.isNullOrBlank()) {
-                        db.networkDao().getDeviceByMac(network.id, found.macAddress)
-                    } else {
-                        db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
-                    }
-
+                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
                     if (existing != null) {
-                        // IP or other details changed - Upsert will handle this via REPLACE
+                        // Keep user set name if changed, but update IP/MAC
                         val updated = existing.copy(
                             ip = found.ip,
-                            macAddress = found.macAddress ?: existing.macAddress
+                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress
                         )
                         db.networkDao().upsertDevice(updated)
                     } else {
@@ -606,7 +600,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac
+                                    macAddress = mac ?: ""
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
