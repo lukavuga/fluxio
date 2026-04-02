@@ -396,7 +396,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac ?: ""
+                                    macAddress = mac
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -406,14 +406,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
             withContext(Dispatchers.IO) {
                 for (found in foundDevices) {
-                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
+                    // Try matching by MAC first, then OriginalName
+                    val existing = if (!found.macAddress.isNullOrBlank()) {
+                        db.networkDao().getDeviceByMac(network.id, found.macAddress)
+                    } else {
+                        db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
+                    }
+
                     if (existing != null) {
-                        // Keep user set name if changed, but update IP/MAC
+                        // IP or other details changed - Upsert will handle this via REPLACE
                         val updated = existing.copy(
                             ip = found.ip,
-                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress
+                            macAddress = found.macAddress ?: existing.macAddress
                         )
-                        db.networkDao().updateDevice(updated)
+                        db.networkDao().upsertDevice(updated)
                     } else {
                         db.networkDao().upsertDevice(found)
                     }
@@ -435,14 +441,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun getMacFromArp(ip: String): String? {
         try {
             val address = InetAddress.getByName(ip)
-            // Try NetworkInterface first (usually works for local device)
+            // Try NetworkInterface first
             val networkInterface = NetworkInterface.getByInetAddress(address)
             if (networkInterface != null) {
                 val mac = networkInterface.hardwareAddress
                 if (mac != null) return mac.joinToString(":") { "%02X".format(it) }
             }
 
-            // Fallback: Read ARP table (might be restricted on Android 10+)
+            // Fallback: Read ARP table
             val reader = BufferedReader(FileReader("/proc/net/arp"))
             var line: String?
             while (reader.readLine().also { line = it } != null) {
@@ -600,7 +606,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac ?: ""
+                                    macAddress = mac
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }

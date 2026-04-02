@@ -40,6 +40,7 @@ class DeviceAdapter(
         private val deviceIcon: ImageView = itemView.findViewById(R.id.imgDeviceIcon)
         private val deviceName: TextView = itemView.findViewById(R.id.txtDeviceName)
         private val deviceIp: TextView = itemView.findViewById(R.id.txtDeviceIp)
+        private val deviceMac: TextView = itemView.findViewById(R.id.txtDeviceMac)
         private val deviceStatus: TextView = itemView.findViewById(R.id.txtDeviceStatus)
         private val btnPowerControl: Button = itemView.findViewById(R.id.btnPowerControl)
 
@@ -51,9 +52,10 @@ class DeviceAdapter(
             val context = itemView.context
             deviceName.text = device.name
             deviceIp.text = device.ip
+            deviceMac.text = if (!device.macAddress.isNullOrBlank()) "MAC: ${device.macAddress}" else "MAC: Unknown"
             deviceStatus.text = device.status
 
-            // 1. Set status color using KTX toColorInt()
+            // 1. Set status color
             if (device.status == "Active" || device.status == "Online") {
                 deviceStatus.setTextColor("#00E676".toColorInt()) // Neon Green
             } else {
@@ -71,7 +73,7 @@ class DeviceAdapter(
             deviceIcon.setImageResource(iconRes)
             deviceIcon.clearColorFilter()
 
-            // 3. Power Control Button logic for PCs using string resources
+            // 3. Power Control Button logic
             if (device.type == "PC") {
                 btnPowerControl.visibility = View.VISIBLE
                 if (device.status == "Active" || device.status == "Online") {
