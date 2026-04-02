@@ -2,6 +2,7 @@ package com.example.fluxio
 
 import android.content.Context
 import androidx.room.*
+import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "networks")
 data class SavedNetwork(
@@ -12,6 +13,7 @@ data class SavedNetwork(
 )
 
 @Entity(tableName = "devices",
+    indices = [Index(value = ["networkId", "originalName"], unique = true)],
     foreignKeys = [ForeignKey(
         entity = SavedNetwork::class,
         parentColumns = ["id"],
@@ -25,21 +27,28 @@ data class SavedDevice(
     val ip: String,
     val name: String,
     val type: String,
-    val originalName: String // Persistent identifier (hostname at first discovery)
+    val originalName: String, // Persistent identifier (hostname at first discovery)
+    val macAddress: String? = null
 ) {
-    @Ignore var status: String = "Inactive"
+    @Ignore var status: String = "Offline" // Default status
 }
 
 @Dao
 interface NetworkDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertDevice(device: SavedDevice)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDevices(devices: List<SavedDevice>)
+
     @Insert
     suspend fun insertNetwork(network: SavedNetwork): Long
 
-    @Insert
-    suspend fun insertDevices(devices: List<SavedDevice>)
-
     @Query("SELECT * FROM networks ORDER BY timestamp DESC")
     suspend fun getAllNetworks(): List<SavedNetwork>
+
+    @Query("SELECT * FROM devices WHERE networkId = :netId")
+    fun getDevicesFlow(netId: Int): Flow<List<SavedDevice>>
 
     @Query("SELECT * FROM devices WHERE networkId = :netId")
     suspend fun getDevicesForNetwork(netId: Int): List<SavedDevice>
@@ -69,7 +78,7 @@ interface NetworkDao {
     suspend fun updateDeviceIpByOriginalName(netId: Int, originalName: String, newIp: String)
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 2) // Incremented version for schema change
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 4)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 
@@ -84,7 +93,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "fluxio_database"
                 )
-                .fallbackToDestructiveMigration() // Simplest way for schema change during development
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance

@@ -25,10 +25,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.*
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.Socket
+import java.net.*
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
@@ -63,9 +60,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         recyclerCurrent = findViewById(R.id.recyclerCurrent)
         recyclerSaved = findViewById(R.id.recyclerSaved)
 
-        currentDeviceAdapter = DeviceAdapter(mutableListOf()) { device ->
+        currentDeviceAdapter = DeviceAdapter(mutableListOf(), { device ->
             showDeviceInfoDialog(device)
-        }
+        }, { device ->
+            handlePowerControl(device)
+        })
 
         recyclerCurrent.apply {
             layoutManager = GridLayoutManager(this@MainActivity, 2)
@@ -110,6 +109,33 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
 
         checkWifiConnection()
+    }
+
+    private fun handlePowerControl(device: SavedDevice) {
+        lifecycleScope.launch {
+            if (device.status == getString(R.string.active)) {
+                Toast.makeText(this@MainActivity, "Requesting Shutdown for ${device.ip}...", Toast.LENGTH_SHORT).show()
+                WakeOnLan.requestShutdown(device.ip)
+            } else {
+                if (device.macAddress != null) {
+                    Toast.makeText(this@MainActivity, "Sending Magic Packet to ${device.macAddress}...", Toast.LENGTH_SHORT).show()
+                    WakeOnLan.sendMagicPacket(device.macAddress)
+                } else {
+                    Toast.makeText(this@MainActivity, "MAC Address unknown. Cannot send WOL.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            
+            // State Refresh: Quick re-ping after action
+            delay(2000) // Give device time to respond/shut down
+            val isActive = withContext(Dispatchers.IO) { isHostReachable(device.ip, 1000) }
+            val newStatus = if (isActive) getString(R.string.active) else getString(R.string.inactive)
+            
+            // Update UI list
+            val updatedList = currentScanResults.map { 
+                if (it.ip == device.ip) it.copy().apply { status = newStatus } else it 
+            }
+            currentDeviceAdapter.updateList(updatedList)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -255,11 +281,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val devices = dbDevices.map { it.apply { status = getString(R.string.inactive) } }.toMutableList()
 
             withContext(Dispatchers.Main) {
-                val adapter = DeviceAdapter(devices) { device ->
+                val adapter = DeviceAdapter(devices, { device ->
                     showEditDeviceDialog(device) {
                         refreshDeviceList(network.id, recyclerView)
                     }
-                }
+                }, { device -> handlePowerControl(device) })
                 recyclerView.adapter = adapter
                 detailsDialog.show()
             }
@@ -288,7 +314,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val addr = InetAddress.getByName(host)
             if (addr.isReachable(timeout)) return true
             
-            // Fallback: Try common ports
             val commonPorts = intArrayOf(135, 445, 80)
             commonPorts.any { port ->
                 try {
@@ -326,13 +351,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                 val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
                                 val name = formatDeviceName(rawName, host)
                                 val type = identifyDeviceType(name, host)
+                                val mac = getMacFromArp(host)
 
                                 SavedDevice(
                                     networkId = network.id,
                                     ip = host,
                                     name = name,
                                     type = type,
-                                    originalName = name
+                                    originalName = name,
+                                    macAddress = mac
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -344,11 +371,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 for (found in foundDevices) {
                     val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
                     if (existing != null) {
-                        if (existing.ip != found.ip) {
-                            db.networkDao().updateDeviceIpByOriginalName(network.id, found.originalName, found.ip)
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@MainActivity, "Updated IP for ${existing.name}", Toast.LENGTH_SHORT).show()
-                            }
+                        if (existing.ip != found.ip || existing.macAddress != found.macAddress) {
+                            db.networkDao().updateDevice(existing.copy(ip = found.ip, macAddress = found.macAddress))
                         }
                     } else {
                         db.networkDao().insertDevices(listOf(found))
@@ -366,6 +390,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             btn.isEnabled = true
             btn.text = getString(R.string.search_new_devices)
         }
+    }
+
+    private fun getMacFromArp(ip: String): String? {
+        return try {
+            val address = InetAddress.getByName(ip)
+            val networkInterface = NetworkInterface.getByInetAddress(address)
+            val mac = networkInterface?.hardwareAddress
+            mac?.joinToString(":") { "%02X".format(it) }
+        } catch (_: Exception) { null }
     }
 
     private suspend fun refreshDeviceListWithStatus(networkId: Int, recyclerView: RecyclerView, activeIps: List<String>) {
@@ -500,7 +533,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                 val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
                                 val name = formatDeviceName(rawName, host)
                                 val type = identifyDeviceType(name, host)
-                                SavedDevice(0, 0, host, name, type, name).apply { status = getString(R.string.active) }
+                                val mac = getMacFromArp(host)
+                                SavedDevice(0, 0, host, name, type, name, mac).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
                     }
