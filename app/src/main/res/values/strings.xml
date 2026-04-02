@@ -38,4 +38,6 @@
     <string name="new_devices_found">Found %1$d new devices.</string>
     <string name="device_at">Device at %1$s</string>
     <string name="scan_network_toast">Scanning network...</string>
+    <string name="shutdown">SHUTDOWN</string>
+    <string name="power_on">POWER ON</string>
 </resources>

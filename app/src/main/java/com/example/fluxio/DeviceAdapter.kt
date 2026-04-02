@@ -1,12 +1,13 @@
 package com.example.fluxio
 
-import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.graphics.toColorInt
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 
 class DeviceAdapter(
@@ -28,9 +29,11 @@ class DeviceAdapter(
     override fun getItemCount(): Int = devices.size
 
     fun updateList(newDevices: List<SavedDevice>) {
+        val diffCallback = DeviceDiffCallback(devices, newDevices)
+        val diffResult = DiffUtil.calculateDiff(diffCallback)
         devices.clear()
         devices.addAll(newDevices)
-        notifyDataSetChanged()
+        diffResult.dispatchUpdatesTo(this)
     }
 
     class DeviceViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -45,15 +48,16 @@ class DeviceAdapter(
             onItemClick: (SavedDevice) -> Unit,
             onPowerControlClick: (SavedDevice) -> Unit
         ) {
+            val context = itemView.context
             deviceName.text = device.name
             deviceIp.text = device.ip
             deviceStatus.text = device.status
 
-            // 1. Set status color
+            // 1. Set status color using KTX toColorInt()
             if (device.status == "Active" || device.status == "Online") {
-                deviceStatus.setTextColor(Color.parseColor("#00E676")) // Neon Green
+                deviceStatus.setTextColor("#00E676".toColorInt()) // Neon Green
             } else {
-                deviceStatus.setTextColor(Color.parseColor("#FF1744")) // Neon Red
+                deviceStatus.setTextColor("#FF1744".toColorInt()) // Neon Red
             }
 
             // 2. Select correct icon
@@ -67,13 +71,13 @@ class DeviceAdapter(
             deviceIcon.setImageResource(iconRes)
             deviceIcon.clearColorFilter()
 
-            // 3. Power Control Button logic for PCs
+            // 3. Power Control Button logic for PCs using string resources
             if (device.type == "PC") {
                 btnPowerControl.visibility = View.VISIBLE
                 if (device.status == "Active" || device.status == "Online") {
-                    btnPowerControl.text = "SHUTDOWN"
+                    btnPowerControl.text = context.getString(R.string.shutdown)
                 } else {
-                    btnPowerControl.text = "POWER ON"
+                    btnPowerControl.text = context.getString(R.string.power_on)
                 }
                 btnPowerControl.setOnClickListener { onPowerControlClick(device) }
             } else {
@@ -81,6 +85,22 @@ class DeviceAdapter(
             }
 
             itemView.setOnClickListener { onItemClick(device) }
+        }
+    }
+
+    class DeviceDiffCallback(
+        private val oldList: List<SavedDevice>,
+        private val newList: List<SavedDevice>
+    ) : DiffUtil.Callback() {
+        override fun getOldListSize() = oldList.size
+        override fun getNewListSize() = newList.size
+        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            return oldList[oldItemPosition].id == newList[newItemPosition].id
+        }
+        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+            val old = oldList[oldItemPosition]
+            val new = newList[newItemPosition]
+            return old.ip == new.ip && old.name == new.name && old.status == new.status && old.macAddress == new.macAddress
         }
     }
 }

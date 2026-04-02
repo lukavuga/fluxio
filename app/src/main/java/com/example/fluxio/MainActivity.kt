@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
-import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -349,6 +348,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val addr = InetAddress.getByName(host)
             if (addr.isReachable(timeout)) return true
             
+            // Fallback: Try common ports
             val commonPorts = intArrayOf(135, 445, 80)
             commonPorts.any { port ->
                 try {
