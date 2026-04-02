@@ -396,7 +396,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac
+                                    macAddress = mac ?: ""
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -600,7 +600,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac
+                                    macAddress = mac ?: ""
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }

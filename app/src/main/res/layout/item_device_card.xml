@@ -44,6 +44,15 @@
             android:layout_marginTop="4dp"/>
 
         <TextView
+            android:id="@+id/txtDeviceMac"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MAC: Unknown"
+            android:textColor="@color/text_secondary"
+            android:textSize="10sp"
+            android:layout_marginTop="2dp"/>
+
+        <TextView
             android:id="@+id/txtDeviceStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
