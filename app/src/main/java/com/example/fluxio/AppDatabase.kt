@@ -6,16 +6,17 @@ import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "networks")
 data class SavedNetwork(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val timestamp: Long,
     val deviceCount: Int
 )
 
-@Entity(tableName = "devices",
+@Entity(
+    tableName = "devices",
     indices = [
-        Index(value = ["networkId", "originalName"], unique = true),
-        Index(value = ["networkId", "ip"], unique = true)
+        Index(value = ["networkId", "macAddress"], unique = true),
+        Index(value = ["networkId", "originalName"], unique = true)
     ],
     foreignKeys = [ForeignKey(
         entity = SavedNetwork::class,
@@ -25,23 +26,21 @@ data class SavedNetwork(
     )]
 )
 data class SavedDevice(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val networkId: Int,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val networkId: Long,
     val ip: String,
     val name: String,
     val type: String,
-    val originalName: String, // Persistent identifier (hostname at first discovery)
-    val macAddress: String? = null
+    val originalName: String,
+    val macAddress: String,
+    val lastSeen: Long = System.currentTimeMillis(),
+    val isOnline: Boolean = false
 ) {
-    @Ignore var status: String = "Offline"
+    @Ignore var status: String = if (isOnline) "Active" else "Inactive"
 }
 
 @Dao
 interface NetworkDao {
-    /**
-     * Upserts a device. If a conflict occurs on originalName or ip, the existing record is replaced.
-     * This enforces the "One Device = One IP" rule and handles DHCP changes.
-     */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDevice(device: SavedDevice)
 
@@ -54,11 +53,11 @@ interface NetworkDao {
     @Query("SELECT * FROM networks ORDER BY timestamp DESC")
     suspend fun getAllNetworks(): List<SavedNetwork>
 
-    @Query("SELECT * FROM devices WHERE networkId = :netId")
-    fun getDevicesFlow(netId: Int): Flow<List<SavedDevice>>
+    @Query("SELECT * FROM devices WHERE networkId = :netId ORDER BY ip ASC")
+    fun getDevicesFlow(netId: Long): Flow<List<SavedDevice>>
 
     @Query("SELECT * FROM devices WHERE networkId = :netId")
-    suspend fun getDevicesForNetwork(netId: Int): List<SavedDevice>
+    suspend fun getDevicesForNetwork(netId: Long): List<SavedDevice>
 
     @Delete
     suspend fun deleteNetwork(network: SavedNetwork)
@@ -76,19 +75,19 @@ interface NetworkDao {
     suspend fun updateNetwork(network: SavedNetwork)
 
     @Query("SELECT * FROM networks WHERE id = :id")
-    suspend fun getNetworkById(id: Int): SavedNetwork?
+    suspend fun getNetworkById(id: Long): SavedNetwork?
 
     @Query("SELECT * FROM devices WHERE networkId = :netId AND originalName = :originalName LIMIT 1")
-    suspend fun getDeviceByOriginalName(netId: Int, originalName: String): SavedDevice?
+    suspend fun getDeviceByOriginalName(netId: Long, originalName: String): SavedDevice?
 
-    @Query("SELECT * FROM devices WHERE networkId = :netId AND ip = :ip LIMIT 1")
-    suspend fun getDeviceByIp(netId: Int, ip: String): SavedDevice?
+    @Query("SELECT * FROM devices WHERE networkId = :netId AND macAddress = :mac LIMIT 1")
+    suspend fun getDeviceByMac(netId: Long, mac: String): SavedDevice?
 
-    @Query("UPDATE devices SET ip = :newIp WHERE networkId = :netId AND originalName = :originalName")
-    suspend fun updateDeviceIpByOriginalName(netId: Int, originalName: String, newIp: String)
+    @Query("UPDATE devices SET isOnline = :online, lastSeen = :timestamp WHERE networkId = :netId")
+    suspend fun markAllOffline(netId: Long, online: Boolean = false, timestamp: Long = System.currentTimeMillis())
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 5)
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 6)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 

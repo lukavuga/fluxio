@@ -243,7 +243,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             timestamp = System.currentTimeMillis(),
             deviceCount = currentScanResults.size
         )
-        val netId = db.networkDao().insertNetwork(network).toInt()
+        val netId = db.networkDao().insertNetwork(network)
 
         val devicesToSave = currentScanResults.map {
             it.copy(networkId = netId)
@@ -394,7 +394,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = name,
-                                    macAddress = mac
+                                    macAddress = mac!!
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -436,7 +436,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         } catch (_: Exception) { null }
     }
 
-    private suspend fun refreshDeviceListWithStatus(networkId: Int, recyclerView: RecyclerView, activeIps: List<String>) {
+    private suspend fun refreshDeviceListWithStatus(networkId: Long, recyclerView: RecyclerView, activeIps: List<String>) {
         val allDevices = withContext(Dispatchers.IO) { db.networkDao().getDevicesForNetwork(networkId) }
         val uiDevices = allDevices.map { device ->
             device.apply { status = if (activeIps.contains(device.ip)) getString(R.string.active) else getString(R.string.inactive) }
@@ -446,7 +446,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    private fun refreshDeviceList(networkId: Int, recyclerView: RecyclerView) {
+    private fun refreshDeviceList(networkId: Long, recyclerView: RecyclerView) {
         lifecycleScope.launch(Dispatchers.IO) {
             val devices = db.networkDao().getDevicesForNetwork(networkId)
             devices.forEach { it.status = getString(R.string.inactive) }
@@ -469,7 +469,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             isFocusable = false
             isClickable = false
         }
-        editMac.setText(device.macAddress ?: "")
+        editMac.setText(device.macAddress)
 
         val types = arrayOf("PC", "PHONE", "TV", "ROUTER", "PRINTER", "IOT")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, types)
@@ -556,7 +556,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 return@launch
             }
 
-            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE", "MY_DEVICE").apply { status = getString(R.string.active) }
+            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE", "MY_DEVICE", "").apply { status = getString(R.string.active) }
             addDeviceToUI(me)
 
             val subnetPrefix = myIp.substringBeforeLast(".")
@@ -572,7 +572,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                 val name = formatDeviceName(rawName, host)
                                 val type = identifyDeviceType(name, host)
                                 val mac = getMacFromArp(host)
-                                SavedDevice(0, 0, host, name, type, name, mac).apply { status = getString(R.string.active) }
+                                SavedDevice(0, 0, host, name, type, name, mac ?: "").apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
                     }
