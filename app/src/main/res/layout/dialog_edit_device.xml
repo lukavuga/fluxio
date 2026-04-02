@@ -18,6 +18,13 @@
         android:layout_marginTop="16dp"
         android:hint="IP Address" />
 
+    <EditText
+        android:id="@+id/editDeviceMac"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:hint="MAC Address (e.g. AA:BB:CC:DD:EE:FF)" />
+
     <Spinner
         android:id="@+id/spinnerDeviceType"
         android:layout_width="match_parent"

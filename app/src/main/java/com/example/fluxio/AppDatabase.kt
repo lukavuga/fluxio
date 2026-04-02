@@ -13,7 +13,10 @@ data class SavedNetwork(
 )
 
 @Entity(tableName = "devices",
-    indices = [Index(value = ["networkId", "originalName"], unique = true)],
+    indices = [
+        Index(value = ["networkId", "originalName"], unique = true),
+        Index(value = ["networkId", "ip"], unique = true)
+    ],
     foreignKeys = [ForeignKey(
         entity = SavedNetwork::class,
         parentColumns = ["id"],
@@ -30,11 +33,15 @@ data class SavedDevice(
     val originalName: String, // Persistent identifier (hostname at first discovery)
     val macAddress: String? = null
 ) {
-    @Ignore var status: String = "Offline" // Default status
+    @Ignore var status: String = "Offline"
 }
 
 @Dao
 interface NetworkDao {
+    /**
+     * Upserts a device. If a conflict occurs on originalName or ip, the existing record is replaced.
+     * This enforces the "One Device = One IP" rule and handles DHCP changes.
+     */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDevice(device: SavedDevice)
 
@@ -74,11 +81,14 @@ interface NetworkDao {
     @Query("SELECT * FROM devices WHERE networkId = :netId AND originalName = :originalName LIMIT 1")
     suspend fun getDeviceByOriginalName(netId: Int, originalName: String): SavedDevice?
 
+    @Query("SELECT * FROM devices WHERE networkId = :netId AND ip = :ip LIMIT 1")
+    suspend fun getDeviceByIp(netId: Int, ip: String): SavedDevice?
+
     @Query("UPDATE devices SET ip = :newIp WHERE networkId = :netId AND originalName = :originalName")
     suspend fun updateDeviceIpByOriginalName(netId: Int, originalName: String, newIp: String)
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 4)
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 5)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 

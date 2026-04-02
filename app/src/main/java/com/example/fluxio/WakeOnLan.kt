@@ -1,16 +1,22 @@
 package com.example.fluxio
 
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.Properties
 
 object WakeOnLan {
-    private const val PORT = 9
+    private const val WOL_PORT = 9
 
+    /**
+     * Sends a Magic Packet to wake up a device.
+     */
     suspend fun sendMagicPacket(macAddress: String?) {
-        if (macAddress == null) return
+        if (macAddress.isNullOrBlank()) return
         
         withContext(Dispatchers.IO) {
             try {
@@ -25,8 +31,9 @@ object WakeOnLan {
                     i += macBytes.size
                 }
 
+                // Broadcast to the entire local network
                 val address = InetAddress.getByName("255.255.255.255")
-                val packet = DatagramPacket(bytes, bytes.size, address, PORT)
+                val packet = DatagramPacket(bytes, bytes.size, address, WOL_PORT)
                 DatagramSocket().use { socket ->
                     socket.broadcast = true
                     socket.send(packet)
@@ -40,7 +47,7 @@ object WakeOnLan {
     private fun getMacBytes(macStr: String): ByteArray {
         val bytes = ByteArray(6)
         val hex = macStr.split(":", "-")
-        if (hex.size != 6) throw IllegalArgumentException("Invalid MAC address.")
+        if (hex.size != 6) throw IllegalArgumentException("Invalid MAC address: $macStr")
         try {
             for (i in 0..5) {
                 bytes[i] = hex[i].toInt(16).toByte()
@@ -52,21 +59,37 @@ object WakeOnLan {
     }
 
     /**
-     * Placeholder for remote shutdown.
-     * In a real-world scenario, this would likely involve:
-     * 1. Sending a command via SSH (requires JSch library)
-     * 2. Sending an HTTP request to a lightweight listener running on the PC
-     * 3. Sending a specific UDP packet if a custom service is listening
+     * Shuts down a remote PC using SSH.
+     * Required setup on target: 
+     * - Windows: Install OpenSSH Server, enable it in Services.
+     * - Linux: Install openssh-server.
      */
-    suspend fun requestShutdown(ipAddress: String) {
-        withContext(Dispatchers.IO) {
-            // Placeholder: Log the request
-            println("Requesting shutdown for $ipAddress")
-            
-            // Example approach: SSH (pseudo-code)
-            // val ssh = SSHClient()
-            // ssh.connect(ipAddress)
-            // ssh.execute("shutdown /s /t 0")
+    suspend fun shutdownPC(ipAddress: String, user: String, pass: String, isWindows: Boolean = true): Boolean {
+        return withContext(Dispatchers.IO) {
+            var session: Session? = null
+            try {
+                val jsch = JSch()
+                session = jsch.getSession(user, ipAddress, 22)
+                session.setPassword(pass)
+
+                val config = Properties()
+                config["StrictHostKeyChecking"] = "no"
+                session.setConfig(config)
+                session.timeout = 5000
+                session.connect()
+
+                val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
+                val command = if (isWindows) "shutdown /s /f /t 0" else "sudo poweroff"
+                channel.setCommand(command)
+                channel.connect()
+                
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            } finally {
+                session?.disconnect()
+            }
         }
     }
 }

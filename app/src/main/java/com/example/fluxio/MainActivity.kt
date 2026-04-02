@@ -112,28 +112,63 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun handlePowerControl(device: SavedDevice) {
-        lifecycleScope.launch {
-            if (device.status == getString(R.string.active)) {
-                Toast.makeText(this@MainActivity, "Requesting Shutdown for ${device.ip}...", Toast.LENGTH_SHORT).show()
-                WakeOnLan.requestShutdown(device.ip)
+        if (device.status == getString(R.string.active)) {
+            showShutdownDialog(device)
+        } else {
+            if (device.macAddress.isNullOrBlank()) {
+                Toast.makeText(this, "Missing MAC address! Please add it in edit menu.", Toast.LENGTH_LONG).show()
             } else {
-                if (device.macAddress != null) {
+                lifecycleScope.launch {
                     Toast.makeText(this@MainActivity, "Sending Magic Packet to ${device.macAddress}...", Toast.LENGTH_SHORT).show()
                     WakeOnLan.sendMagicPacket(device.macAddress)
-                } else {
-                    Toast.makeText(this@MainActivity, "MAC Address unknown. Cannot send WOL.", Toast.LENGTH_SHORT).show()
+                    
+                    delay(3000)
+                    refreshDeviceStatus(device)
                 }
             }
-            
-            // State Refresh: Quick re-ping after action
-            delay(2000) // Give device time to respond/shut down
-            val isActive = withContext(Dispatchers.IO) { isHostReachable(device.ip, 1000) }
-            val newStatus = if (isActive) getString(R.string.active) else getString(R.string.inactive)
-            
-            // Update UI list
-            val updatedList = currentScanResults.map { 
-                if (it.ip == device.ip) it.copy().apply { status = newStatus } else it 
+        }
+    }
+
+    private fun showShutdownDialog(device: SavedDevice) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_shutdown_credentials, null)
+        val editUser = dialogView.findViewById<EditText>(R.id.editSshUser)
+        val editPass = dialogView.findViewById<EditText>(R.id.editSshPass)
+        val radioWindows = dialogView.findViewById<RadioButton>(R.id.radioWindows)
+
+        AlertDialog.Builder(this)
+            .setTitle("Remote Shutdown")
+            .setView(dialogView)
+            .setPositiveButton("Shutdown") { _, _ ->
+                val user = editUser.text.toString()
+                val pass = editPass.text.toString()
+                val isWindows = radioWindows.isChecked
+                
+                if (user.isNotBlank() && pass.isNotEmpty()) {
+                    lifecycleScope.launch {
+                        Toast.makeText(this@MainActivity, "Connecting to ${device.ip}...", Toast.LENGTH_SHORT).show()
+                        val success = WakeOnLan.shutdownPC(device.ip, user, pass, isWindows)
+                        if (success) {
+                            Toast.makeText(this@MainActivity, "Shutdown command sent.", Toast.LENGTH_SHORT).show()
+                            delay(5000)
+                            refreshDeviceStatus(device)
+                        } else {
+                            Toast.makeText(this@MainActivity, "SSH Connection failed.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
+    }
+
+    private suspend fun refreshDeviceStatus(device: SavedDevice) {
+        val isActive = withContext(Dispatchers.IO) { isHostReachable(device.ip, 1000) }
+        val newStatus = if (isActive) getString(R.string.active) else getString(R.string.inactive)
+        
+        val updatedList = currentScanResults.map { 
+            if (it.ip == device.ip) it.copy().apply { status = newStatus } else it 
+        }
+        withContext(Dispatchers.Main) {
             currentDeviceAdapter.updateList(updatedList)
         }
     }
@@ -425,6 +460,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
+        val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
         val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
 
         editName.setText(device.name)
@@ -433,6 +469,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             isFocusable = false
             isClickable = false
         }
+        editMac.setText(device.macAddress ?: "")
 
         val types = arrayOf("PC", "PHONE", "TV", "ROUTER", "PRINTER", "IOT")
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, types)
@@ -446,7 +483,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         dialogView.findViewById<Button>(R.id.btnSaveChanges).setOnClickListener {
             val updated = device.copy(
                 name = editName.text.toString(),
-                type = spinner.selectedItem.toString()
+                type = spinner.selectedItem.toString(),
+                macAddress = editMac.text.toString().trim().uppercase()
             )
             lifecycleScope.launch(Dispatchers.IO) {
                 db.networkDao().updateDevice(updated)
