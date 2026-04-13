@@ -14,13 +14,14 @@ class ScheduledPowerWorker(context: Context, params: WorkerParameters) : Corouti
         if (deviceId == -1L) return@withContext Result.failure()
 
         val db = AppDatabase.getDatabase(applicationContext)
-        val device = db.networkDao().getDeviceById(deviceId) ?: return@withContext Result.failure()
+        val deviceView = db.networkDao().getDeviceViewByDeviceId(deviceId) ?: return@withContext Result.failure()
 
         try {
-            when (device.type) {
-                DeviceType.PC -> {
+            val typeName = deviceView.typeEntity?.typeName?.uppercase() ?: "OTHER"
+            when (typeName) {
+                "PC", "LAPTOP" -> {
                     if (action == "ON") {
-                        WakeOnLan.sendMagicPacket(device.macAddress)
+                        WakeOnLan.sendMagicPacket(deviceView.device.macAddress)
                     } else {
                         // Remote shutdown logic placeholder
                     }
