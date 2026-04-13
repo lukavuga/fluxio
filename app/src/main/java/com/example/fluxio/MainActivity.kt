@@ -177,11 +177,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val isActive = withContext(Dispatchers.IO) { isHostReachable(device.ip, 1000) }
         val newStatus = if (isActive) getString(R.string.active) else getString(R.string.inactive)
         
-        val updatedList = currentScanResults.map { 
-            if (it.ip == device.ip) it.copy().apply { status = newStatus } else it 
-        }
+        currentScanResults.find { it.ip == device.ip }?.apply { status = newStatus }
         withContext(Dispatchers.Main) {
-            currentDeviceAdapter.updateList(updatedList)
+            currentDeviceAdapter.updateList(ArrayList(currentScanResults))
         }
     }
 
@@ -327,7 +325,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val dbDevices = db.networkDao().getDevicesForNetwork(network.id)
             withContext(Dispatchers.Main) {
                 val adapter = DeviceAdapter(dbDevices.toMutableList(), { device ->
-                    showDeviceInfoDialog(device)
+                    showEditDeviceDialog(device) {
+                        refreshDeviceList(network.id, recyclerView)
+                    }
                 }, { device -> handlePowerControl(device) })
                 recyclerView.adapter = adapter
                 detailsDialog.show()
@@ -340,10 +340,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private suspend fun checkStatusOnly(devices: List<SavedDevice>, recyclerView: RecyclerView) {
         val updatedDevices = withContext(Dispatchers.IO) {
             devices.map { device ->
-                if (isHostReachable(device.ip, 500)) {
-                    device.copy(isOnline = true).apply { status = getString(R.string.active) }
-                } else {
-                    device.copy(isOnline = false).apply { status = getString(R.string.inactive) }
+                val online = isHostReachable(device.ip, 500)
+                device.copy(isOnline = online).apply { 
+                    status = if (online) getString(R.string.active) else getString(R.string.inactive) 
                 }
             }
         }
@@ -357,7 +356,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val addr = InetAddress.getByName(host)
             if (addr.isReachable(timeout)) return true
             
-            // Fallback: Try common ports
             val commonPorts = intArrayOf(135, 445, 80)
             commonPorts.any { port ->
                 try {
@@ -418,7 +416,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     if (existing != null) {
                         val updated = existing.copy(
                             ip = found.ip,
-                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress,
+                            macAddress = found.macAddress ?: existing.macAddress,
                             isOnline = true
                         )
                         db.networkDao().upsertDevice(updated)
@@ -434,7 +432,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 ))
             }
 
-            refreshDeviceListWithStatus(network.id, recyclerView, foundDevices.map { it.ip })
+            refreshDeviceList(network.id, recyclerView)
             btn.isEnabled = true
             btn.text = getString(R.string.search_new_devices)
         }
@@ -462,17 +460,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             reader.close()
         } catch (_: Exception) { }
         return null
-    }
-
-    private suspend fun refreshDeviceListWithStatus(networkId: Long, recyclerView: RecyclerView, activeIps: List<String>) {
-        val allDevices = withContext(Dispatchers.IO) { db.networkDao().getDevicesForNetwork(networkId) }
-        val uiDevices = allDevices.map { device ->
-            val online = activeIps.contains(device.ip)
-            device.copy(isOnline = online).apply { status = if (online) getString(R.string.active) else getString(R.string.inactive) }
-        }
-        withContext(Dispatchers.Main) {
-            (recyclerView.adapter as? DeviceAdapter)?.updateList(uiDevices)
-        }
     }
 
     private fun refreshDeviceList(networkId: Long, recyclerView: RecyclerView) {
@@ -511,7 +498,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val updated = device.copy(
                 name = editName.text.toString(),
                 type = spinner.selectedItem as DeviceType,
-                macAddress = editMac.text.toString().trim().uppercase()
+                macAddress = editMac.text.toString().trim().uppercase().ifBlank { null }
             )
             lifecycleScope.launch(Dispatchers.IO) {
                 db.networkDao().updateDevice(updated)
@@ -559,6 +546,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 DeviceType.SMARTPHONE -> R.drawable.phone
                 DeviceType.PC -> R.drawable.computer
                 DeviceType.PRINTER -> R.drawable.printer
+                DeviceType.ROUTER -> R.drawable.router
                 else -> R.drawable.fluxio
             }
             findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
@@ -583,7 +571,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 return@launch
             }
 
-            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), DeviceType.SMARTPHONE, "MY_DEVICE", "").apply { status = getString(R.string.active) }
+            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), DeviceType.SMARTPHONE, "MY_DEVICE", null).apply { status = getString(R.string.active) }
             addDeviceToUI(me)
 
             val subnetPrefix = myIp.substringBeforeLast(".")
@@ -605,7 +593,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac ?: ""
+                                    macAddress = mac,
+                                    isOnline = true
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -626,7 +615,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 currentScanResults.sortBy { it.ip.substringAfterLast(".").toIntOrNull() ?: 0 }
             }
         }
-        currentDeviceAdapter.updateList(currentScanResults)
+        currentDeviceAdapter.updateList(ArrayList(currentScanResults))
     }
 
     private fun getLocalIpAddress(): String? {
@@ -678,6 +667,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             mobileKeywords.any { h.contains(it) } -> DeviceType.SMARTPHONE
             h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> DeviceType.PRINTER
             h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> DeviceType.PC
+            h.contains("router") || h.contains("gateway") || ip.endsWith(".1") -> DeviceType.ROUTER
             else -> DeviceType.OTHER
         }
     }

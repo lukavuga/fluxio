@@ -5,7 +5,7 @@ import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
 enum class DeviceType {
-    PC, PRINTER, TV, SMARTPHONE, OTHER
+    PC, PRINTER, TV, SMARTPHONE, LAPTOP, ROUTER, OTHER
 }
 
 @Entity(tableName = "networks")
@@ -35,8 +35,8 @@ data class SavedDevice(
     val ip: String,
     val name: String,
     val type: DeviceType,
-    val originalName: String,
-    val macAddress: String?,
+    val originalName: String, // Persistent identifier (hostname at first discovery)
+    val macAddress: String?, // Nullable to handle discovery failures
     val lastSeen: Long = System.currentTimeMillis(),
     val isOnline: Boolean = false
 ) {
@@ -94,7 +94,7 @@ interface NetworkDao {
     suspend fun markAllOffline(netId: Long, online: Boolean = false, timestamp: Long = System.currentTimeMillis())
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 10) // Incremented for Enum and schema change
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 11)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
