@@ -53,4 +53,7 @@ dependencies {
 
     // --- SSH ---
     implementation(libs.jsch)
+
+    // --- WORK MANAGER ---
+    implementation(libs.androidx.work.runtime.ktx)
 }

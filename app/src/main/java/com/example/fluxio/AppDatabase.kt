@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+enum class DeviceType {
+    PC, PRINTER, TV, SMARTPHONE, OTHER
+}
+
 @Entity(tableName = "networks")
 data class SavedNetwork(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -30,9 +34,9 @@ data class SavedDevice(
     val networkId: Long,
     val ip: String,
     val name: String,
-    val type: String,
-    val originalName: String, // Persistent identifier (hostname at first discovery)
-    val macAddress: String?, // Nullable to handle discovery failures
+    val type: DeviceType,
+    val originalName: String,
+    val macAddress: String?,
     val lastSeen: Long = System.currentTimeMillis(),
     val isOnline: Boolean = false
 ) {
@@ -77,6 +81,9 @@ interface NetworkDao {
     @Query("SELECT * FROM networks WHERE id = :id")
     suspend fun getNetworkById(id: Long): SavedNetwork?
 
+    @Query("SELECT * FROM devices WHERE id = :id")
+    suspend fun getDeviceById(id: Long): SavedDevice?
+
     @Query("SELECT * FROM devices WHERE networkId = :netId AND originalName = :originalName LIMIT 1")
     suspend fun getDeviceByOriginalName(netId: Long, originalName: String): SavedDevice?
 
@@ -87,7 +94,8 @@ interface NetworkDao {
     suspend fun markAllOffline(netId: Long, online: Boolean = false, timestamp: Long = System.currentTimeMillis())
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 7) // Incremented for nullable mac
+@Database(entities = [SavedNetwork::class, SavedDevice::class], version = 10) // Incremented for Enum and schema change
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
 
@@ -108,5 +116,17 @@ abstract class AppDatabase : RoomDatabase() {
                 instance
             }
         }
+    }
+}
+
+class Converters {
+    @TypeConverter
+    fun fromDeviceType(value: DeviceType) = value.name
+
+    @TypeConverter
+    fun toDeviceType(value: String) = try {
+        DeviceType.valueOf(value)
+    } catch (e: Exception) {
+        DeviceType.OTHER
     }
 }

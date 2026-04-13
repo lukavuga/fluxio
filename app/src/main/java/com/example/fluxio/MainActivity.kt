@@ -23,6 +23,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.FileReader
@@ -110,19 +111,29 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
 
         checkWifiConnection()
+        checkConnectivity()
+    }
+
+    private fun checkConnectivity() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(activeNetwork)
+        val isConnected = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (!isConnected) {
+            Snackbar.make(findViewById(android.R.id.content), "No internet connection", Snackbar.LENGTH_LONG).show()
+        }
     }
 
     private fun handlePowerControl(device: SavedDevice) {
-        if (device.status == getString(R.string.active)) {
-            showShutdownDialog(device)
-        } else {
-            if (device.macAddress.isNullOrBlank()) {
-                Toast.makeText(this, "Missing MAC address! Please add it in edit menu.", Toast.LENGTH_LONG).show()
+        lifecycleScope.launch {
+            if (device.status == getString(R.string.active)) {
+                showShutdownDialog(device)
             } else {
-                lifecycleScope.launch {
-                    Toast.makeText(this@MainActivity, "Sending Magic Packet to ${device.macAddress}...", Toast.LENGTH_SHORT).show()
+                if (device.macAddress.isNullOrBlank()) {
+                    Toast.makeText(this@MainActivity, "Missing MAC address!", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Sending Magic Packet...", Toast.LENGTH_SHORT).show()
                     WakeOnLan.sendMagicPacket(device.macAddress)
-                    
                     delay(3000)
                     refreshDeviceStatus(device)
                 }
@@ -314,19 +325,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         lifecycleScope.launch(Dispatchers.IO) {
             val dbDevices = db.networkDao().getDevicesForNetwork(network.id)
-            val devices = dbDevices.map { it.apply { status = getString(R.string.inactive) } }.toMutableList()
-
             withContext(Dispatchers.Main) {
-                val adapter = DeviceAdapter(devices, { device ->
-                    showEditDeviceDialog(device) {
-                        refreshDeviceList(network.id, recyclerView)
-                    }
+                val adapter = DeviceAdapter(dbDevices.toMutableList(), { device ->
+                    showDeviceInfoDialog(device)
                 }, { device -> handlePowerControl(device) })
                 recyclerView.adapter = adapter
                 detailsDialog.show()
             }
 
-            checkStatusOnly(devices, recyclerView)
+            checkStatusOnly(dbDevices, recyclerView)
         }
     }
 
@@ -334,9 +341,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val updatedDevices = withContext(Dispatchers.IO) {
             devices.map { device ->
                 if (isHostReachable(device.ip, 500)) {
-                    device.copy().apply { status = getString(R.string.active) }
+                    device.copy(isOnline = true).apply { status = getString(R.string.active) }
                 } else {
-                    device
+                    device.copy(isOnline = false).apply { status = getString(R.string.inactive) }
                 }
             }
         }
@@ -396,7 +403,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                     name = name,
                                     type = type,
                                     originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac
+                                    macAddress = mac,
+                                    isOnline = true
                                 ).apply { status = getString(R.string.active) }
                             } else null
                         } catch (_: Exception) { null }
@@ -408,10 +416,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 for (found in foundDevices) {
                     val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
                     if (existing != null) {
-                        // Keep user set name if changed, but update IP/MAC
                         val updated = existing.copy(
                             ip = found.ip,
-                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress
+                            macAddress = if (!found.macAddress.isNullOrBlank()) found.macAddress else existing.macAddress,
+                            isOnline = true
                         )
                         db.networkDao().upsertDevice(updated)
                     } else {
@@ -435,14 +443,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun getMacFromArp(ip: String): String? {
         try {
             val address = InetAddress.getByName(ip)
-            // Try NetworkInterface first
             val networkInterface = NetworkInterface.getByInetAddress(address)
             if (networkInterface != null) {
                 val mac = networkInterface.hardwareAddress
                 if (mac != null) return mac.joinToString(":") { "%02X".format(it) }
             }
 
-            // Fallback: Read ARP table
             val reader = BufferedReader(FileReader("/proc/net/arp"))
             var line: String?
             while (reader.readLine().also { line = it } != null) {
@@ -461,7 +467,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private suspend fun refreshDeviceListWithStatus(networkId: Long, recyclerView: RecyclerView, activeIps: List<String>) {
         val allDevices = withContext(Dispatchers.IO) { db.networkDao().getDevicesForNetwork(networkId) }
         val uiDevices = allDevices.map { device ->
-            device.apply { status = if (activeIps.contains(device.ip)) getString(R.string.active) else getString(R.string.inactive) }
+            val online = activeIps.contains(device.ip)
+            device.copy(isOnline = online).apply { status = if (online) getString(R.string.active) else getString(R.string.inactive) }
         }
         withContext(Dispatchers.Main) {
             (recyclerView.adapter as? DeviceAdapter)?.updateList(uiDevices)
@@ -471,7 +478,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun refreshDeviceList(networkId: Long, recyclerView: RecyclerView) {
         lifecycleScope.launch(Dispatchers.IO) {
             val devices = db.networkDao().getDevicesForNetwork(networkId)
-            devices.forEach { it.status = getString(R.string.inactive) }
             withContext(Dispatchers.Main) {
                 (recyclerView.adapter as? DeviceAdapter)?.updateList(devices)
             }
@@ -491,21 +497,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             isFocusable = false
             isClickable = false
         }
-        editMac.setText(device.macAddress)
+        editMac.setText(device.macAddress ?: "")
 
-        val types = arrayOf("PC", "PHONE", "TV", "ROUTER", "PRINTER", "IOT")
+        val types = DeviceType.values()
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, types)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
-        val typeIndex = types.indexOf(device.type)
-        if (typeIndex >= 0) spinner.setSelection(typeIndex)
+        spinner.setSelection(device.type.ordinal)
 
         val dialog = AlertDialog.Builder(this).setView(dialogView).create()
 
         dialogView.findViewById<Button>(R.id.btnSaveChanges).setOnClickListener {
             val updated = device.copy(
                 name = editName.text.toString(),
-                type = spinner.selectedItem.toString(),
+                type = spinner.selectedItem as DeviceType,
                 macAddress = editMac.text.toString().trim().uppercase()
             )
             lifecycleScope.launch(Dispatchers.IO) {
@@ -547,14 +552,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         dialogView.apply {
             findViewById<TextView>(R.id.txtDeviceNameDialog).text = device.name
             findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ip
-            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type
+            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type.name
             findViewById<TextView>(R.id.txtDeviceStatusDialog).text = device.status
             val iconRes = when (device.type) {
-                "TV" -> R.drawable.tv
-                "PHONE", "MOBILE" -> R.drawable.phone
-                "ROUTER" -> R.drawable.router
-                "PRINTER" -> R.drawable.printer
-                else -> R.drawable.computer
+                DeviceType.TV -> R.drawable.tv
+                DeviceType.SMARTPHONE -> R.drawable.phone
+                DeviceType.PC -> R.drawable.computer
+                DeviceType.PRINTER -> R.drawable.printer
+                else -> R.drawable.fluxio
             }
             findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
         }
@@ -562,7 +567,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun checkWifiConnection() {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork ?: return
         val caps = cm.getNetworkCapabilities(network)
         if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
@@ -578,7 +583,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 return@launch
             }
 
-            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), "PHONE", "MY_DEVICE", "").apply { status = getString(R.string.active) }
+            val me = SavedDevice(0, 0, myIp, getString(R.string.my_device), DeviceType.SMARTPHONE, "MY_DEVICE", "").apply { status = getString(R.string.active) }
             addDeviceToUI(me)
 
             val subnetPrefix = myIp.substringBeforeLast(".")
@@ -625,7 +630,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun getLocalIpAddress(): String? {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val link = cm.getLinkProperties(cm.activeNetwork)
         return link?.linkAddresses?.firstOrNull {
             it.address is Inet4Address && !it.address.isLoopbackAddress
@@ -649,7 +654,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         return cleanName.replaceFirstChar { it.uppercase() }
     }
 
-    private fun identifyDeviceType(hostname: String, ip: String): String {
+    private fun identifyDeviceType(hostname: String, ip: String): DeviceType {
         val h = hostname.lowercase()
             .removeSuffix(".local")
             .removeSuffix(".home")
@@ -657,8 +662,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .removeSuffix(".modem")
             .removeSuffix(".gateway")
             .removeSuffix(".broadband")
-
-        val lastOctet = ip.substringAfterLast(".").toIntOrNull() ?: 0
 
         val mobileKeywords = listOf(
             "samsung", "galaxy", "iphone", "apple", "pixel", "google",
@@ -671,13 +674,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         )
 
         return when {
-            lastOctet == 1 || h.contains("gateway") || h.contains("router") || h.contains("modem") -> "ROUTER"
-            h.contains("tv") || h.contains("bravia") || h.contains("chromecast") || h.contains("roku") -> "TV"
-            mobileKeywords.any { h.contains(it) } -> "PHONE"
-            h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> "PRINTER"
-            h.contains("cam") || h.contains("nest") || h.contains("hub") || h.contains("sonos") || h.contains("hue") -> "IOT"
-            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> "PC"
-            else -> "PC"
+            h.contains("tv") || h.contains("bravia") || h.contains("chromecast") || h.contains("roku") -> DeviceType.TV
+            mobileKeywords.any { h.contains(it) } -> DeviceType.SMARTPHONE
+            h.contains("print") || h.contains("hp") || h.contains("epson") || h.contains("canon") -> DeviceType.PRINTER
+            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") || h.contains("surface") -> DeviceType.PC
+            else -> DeviceType.OTHER
         }
     }
 

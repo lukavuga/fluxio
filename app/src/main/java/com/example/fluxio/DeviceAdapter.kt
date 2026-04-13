@@ -64,19 +64,19 @@ class DeviceAdapter(
                 deviceStatus.setTextColor("#FF1744".toColorInt()) // Neon Red
             }
 
-            // 2. Select correct icon
+            // 2. Select correct icon using the DeviceType enum
             val iconRes = when(device.type) {
-                "TV" -> R.drawable.tv
-                "PHONE", "MOBILE" -> R.drawable.phone
-                "ROUTER" -> R.drawable.router
-                "PRINTER" -> R.drawable.printer
-                else -> R.drawable.computer
+                DeviceType.TV -> R.drawable.tv
+                DeviceType.SMARTPHONE -> R.drawable.phone
+                DeviceType.PRINTER -> R.drawable.printer
+                DeviceType.PC -> R.drawable.computer
+                else -> R.drawable.fluxio
             }
             deviceIcon.setImageResource(iconRes)
             deviceIcon.clearColorFilter()
 
-            // 3. Power Control Button logic
-            if (device.type == "PC") {
+            // 3. Power Control Button logic for PCs
+            if (device.type == DeviceType.PC) {
                 btnPowerControl.visibility = View.VISIBLE
                 if (device.status == "Active" || device.status == "Online") {
                     btnPowerControl.text = context.getString(R.string.shutdown)
