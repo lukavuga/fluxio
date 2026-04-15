@@ -10,17 +10,16 @@ Ime izhaja iz latinske besede *fluxus* (pretok), kar simbolizira nemoten pretok 
 ### 1️⃣ Inteligentno skeniranje in prepoznava
 - **Avtomatsko odkrivanje:** Skeniranje lokalnega omrežja za prikaz vseh povezanih naprav (IP, MAC, Gateway).  
 - **Samodejni zajem MAC naslovov:** Aplikacija avtomatsko pridobi MAC naslove preko ARP tabele sistema, kar odpravlja potrebo po ročnem vnosu.  
-- **Kategorizacija naprav:** Prepoznavanje tipov naprav (PC, hladilnik, TV, tiskalnik) in prilagajanje nadzornih menijev glede na tip naprave.
+- **Kategorizacija naprav:** Prepoznavanje tipov naprav (PC, TV, tiskalnik) in prilagajanje nadzornih menijev glede na tip naprave.
 
 ### 2️⃣ Shranjena omrežja (Saved Networks)
 - **Profili omrežij:** Shranjevanje različnih lokacij (npr. "Dom", "Služba").  
-- **Oddaljeno upravljanje:** Možnost nadzora naprav tudi, ko mobilna naprava ni v istem omrežju, preko povezave s centralnim strežnikom.  
-- **Status Active/Inactive:** Spremljanje stanja naprav v realnem času na podlagi odzivnosti in "lease time" parametrov.
+- **Oddaljeno upravljanje:** Možnost nadzora naprav tudi, ko mobilna naprava ni v istem omrežju.  
+- **Status Active/Inactive:** Spremljanje stanja naprav v realnem času.
 
 ### 3️⃣ Nadzor in avtomatizacija
 - **Wake-on-LAN (WoL):** Vklop ugasnjenih računalnikov preko Magic Packet protokola.  
-- **Pametni urniki:** Možnost nastavitve časa za samodejni vklop ali izklop naprave.  
-- **Specifične nastavitve:** Prilagajanje temperature za pametne hladilnike ali drugih specifičnih parametrov.
+- **Pametni urniki:** Možnost nastavitve časa za samodejni vklop ali izklop naprave.
 
 ### 📶 Povezljivost
 - **Pametna obvestila:** Takojšnje "Pop-up" opozorilo ob zagonu, če mobilna naprava nima internetne povezave.  
@@ -34,14 +33,8 @@ Ime izhaja iz latinske besede *fluxus* (pretok), kar simbolizira nemoten pretok 
 - **Okolje:** Android Studio  
 - **Jezik:** Kotlin  
 - **Baza podatkov:** Room Database (relacijska struktura s tujimi ključi)  
-- **Arhitektura:** MVVM (Model-View-ViewModel)  
-- **Logika v ozadju:** WorkManager za urnike in BroadcastReceivers za stanje omrežja  
-
-### Strežniška infrastruktura
-- **Operacijski sistem:** Linux (Ubuntu Server / Raspberry Pi OS)  
-- **Komunikacija:** REST API / MQTT protokol  
-- **Varnost:** UFW firewall pravila in Port Forwarding na routerju  
-
+- **Arhitektura:** MVVM (Model-View-ViewModel)
+- 
 ---
 
 ## 🔧 Namestitev in konfiguracija
@@ -73,8 +66,7 @@ Ta projekt je licenciran pod MIT licenco.
 ---
 
 ## 👨‍💻 Avtor
-**Luka Vuga**  
-📧 Kontakt: [Vaš Email]  
+**Luka Vuga**    
 
 ---
 
