@@ -9,5 +9,9 @@
             android:id="@+id/nav_saved"
             android:icon="@android:drawable/ic_menu_save"
             android:title="Saved Networks" />
+        <item
+            android:id="@+id/nav_setup"
+            android:icon="@android:drawable/ic_menu_info_details"
+            android:title="Setup Guide" />
     </group>
 </menu>

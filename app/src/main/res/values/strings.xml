@@ -40,4 +40,8 @@
     <string name="scan_network_toast">Scanning network...</string>
     <string name="shutdown">SHUTDOWN</string>
     <string name="power_on">POWER ON</string>
+    <string name="setup_guide">Setup Guide</string>
+    <string name="windows_setup">Windows Setup</string>
+    <string name="linux_setup">Linux Setup</string>
+    <string name="macos_setup">macOS Setup</string>
 </resources>

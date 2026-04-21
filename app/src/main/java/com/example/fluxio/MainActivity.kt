@@ -25,9 +25,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.*
-import java.io.BufferedReader
-import java.io.FileReader
 import java.net.*
+import java.util.*
 import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
@@ -35,19 +34,26 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var layoutCurrent: LinearLayout
     private lateinit var layoutSaved: LinearLayout
+    private lateinit var layoutSetup: ScrollView
+    private lateinit var progressContainer: LinearLayout
+    private lateinit var btnScan: Button
     private lateinit var btnSave: Button
     private lateinit var recyclerCurrent: RecyclerView
     private lateinit var recyclerSaved: RecyclerView
 
     private lateinit var db: AppDatabase
+    private lateinit var repository: NetworkRepository
     private val currentScanResults = mutableListOf<DeviceView>()
     private lateinit var currentDeviceAdapter: DeviceAdapter
+    
+    private var activeDetailsDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         db = AppDatabase.getDatabase(this)
+        repository = NetworkRepository(db)
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
@@ -56,8 +62,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val navView = findViewById<NavigationView>(R.id.nav_view)
         layoutCurrent = findViewById(R.id.layoutCurrentNetwork)
         layoutSaved = findViewById(R.id.layoutSavedNetworks)
+        layoutSetup = findViewById(R.id.layoutSetupGuide)
+        progressContainer = findViewById(R.id.progressContainer)
 
-        val btnScan = findViewById<Button>(R.id.btnScan)
+        btnScan = findViewById(R.id.btnScan)
         btnSave = findViewById(R.id.btnSave)
         recyclerCurrent = findViewById(R.id.recyclerCurrent)
         recyclerSaved = findViewById(R.id.recyclerSaved)
@@ -102,7 +110,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             currentScanResults.clear()
             currentDeviceAdapter.updateList(emptyList())
             btnSave.isEnabled = false
-            Toast.makeText(this, getString(R.string.scan_network_toast), Toast.LENGTH_SHORT).show()
             startSmartScan()
         }
 
@@ -110,12 +117,38 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             showSaveDialog()
         }
 
+        setupGuideButtons()
+
         checkWifiConnection()
         checkConnectivity()
         
         lifecycleScope.launch(Dispatchers.IO) {
             initLookupTables()
         }
+    }
+
+    private fun setupGuideButtons() {
+        findViewById<Button>(R.id.btnCopyWindowsScript).setOnClickListener {
+            val script = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\f.bat\""
+            copyToClipboard(script, "Windows command copied")
+        }
+
+        findViewById<Button>(R.id.btnCopyLinuxScript).setOnClickListener {
+            val cmd = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_linux.sh | sudo bash"
+            copyToClipboard(cmd, "Linux command copied")
+        }
+
+        findViewById<Button>(R.id.btnCopyMacScript).setOnClickListener {
+            val cmd = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_mac.sh | zsh"
+            copyToClipboard(cmd, "macOS command copied")
+        }
+    }
+
+    private fun copyToClipboard(text: String, label: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("Fluxio Setup", text)
+        cm.setPrimaryClip(clip)
+        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
     }
 
     private suspend fun initLookupTables() {
@@ -142,7 +175,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val statusLabel = deviceView?.statusEntity?.statusLabel ?: "Inactive"
 
             if (statusLabel == "Active" || statusLabel == "Online") {
-                Toast.makeText(this@MainActivity, "Shutdown requested for ${device.ip}", Toast.LENGTH_SHORT).show()
+                if (device.sshUsername.isNullOrBlank() || device.sshPassword.isNullOrBlank()) {
+                    Toast.makeText(this@MainActivity, "Please set SSH credentials in Device Settings to shutdown.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Sending Shutdown command via SSH...", Toast.LENGTH_SHORT).show()
+                    withContext(Dispatchers.IO) {
+                        WakeOnLan.shutdownSsh(device.ip, device.sshUsername, device.sshPassword)
+                    }
+                }
             } else {
                 if (device.macAddress.isNullOrBlank()) {
                     Toast.makeText(this@MainActivity, "Missing MAC address!", Toast.LENGTH_LONG).show()
@@ -169,6 +209,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         recyclerSaved.setOnTouchListener(swipeListener)
         layoutCurrent.setOnTouchListener(swipeListener)
         layoutSaved.setOnTouchListener(swipeListener)
+        layoutSetup.setOnTouchListener(swipeListener)
         findViewById<View>(R.id.txtNoSaved).setOnTouchListener(swipeListener)
     }
 
@@ -177,13 +218,21 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             R.id.nav_current -> {
                 layoutCurrent.visibility = View.VISIBLE
                 layoutSaved.visibility = View.GONE
+                layoutSetup.visibility = View.GONE
                 supportActionBar?.title = getString(R.string.title_current)
             }
             R.id.nav_saved -> {
                 layoutCurrent.visibility = View.GONE
                 layoutSaved.visibility = View.VISIBLE
+                layoutSetup.visibility = View.GONE
                 supportActionBar?.title = getString(R.string.title_saved)
                 loadSavedNetworks()
+            }
+            R.id.nav_setup -> {
+                layoutCurrent.visibility = View.GONE
+                layoutSaved.visibility = View.GONE
+                layoutSetup.visibility = View.VISIBLE
+                supportActionBar?.title = getString(R.string.setup_guide)
             }
         }
         drawerLayout.closeDrawer(GravityCompat.START)
@@ -277,19 +326,22 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun showNetworkDetails(network: SavedNetwork) {
+        activeDetailsDialog?.dismiss()
+
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_list, null)
         val recyclerView = dialogView.findViewById<RecyclerView>(R.id.recyclerDeviceList)
         val btnRescan = dialogView.findViewById<Button>(R.id.btnRescanNetwork)
 
         recyclerView.layoutManager = GridLayoutManager(this, 2)
 
-        val detailsDialog = AlertDialog.Builder(this)
+        activeDetailsDialog = AlertDialog.Builder(this)
             .setTitle("${getString(R.string.devices)}: ${network.name}")
             .setView(dialogView)
             .setPositiveButton(getString(R.string.close), null)
             .create()
 
-        detailsDialog.setOnDismissListener {
+        activeDetailsDialog?.setOnDismissListener {
+            activeDetailsDialog = null
             loadSavedNetworks()
         }
 
@@ -306,12 +358,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         }
                     }, { device -> handlePowerControl(device) })
                     recyclerView.adapter = adapter
-                    if (!detailsDialog.isShowing) detailsDialog.show()
                 }
                 
                 checkStatusAndSave(detailList)
             }
         }
+        
+        activeDetailsDialog?.show()
     }
 
     private suspend fun checkStatusAndSave(detailList: List<DeviceView>) {
@@ -320,7 +373,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val inactiveStatusId = db.networkDao().getStatusIdByName("Inactive")
             
             detailList.forEach { view ->
-                val isActive = isHostReachable(view.device.ip, 500)
+                val isActive = repository.isHostReachable(view.device.ip, 500)
                 val newStatusId = if (isActive) activeStatusId else inactiveStatusId
                 
                 if (view.device.statusId != newStatusId) {
@@ -328,22 +381,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 }
             }
         }
-    }
-
-    private fun isHostReachable(host: String, timeout: Int): Boolean {
-        return try {
-            val addr = InetAddress.getByName(host)
-            if (addr.isReachable(timeout)) return true
-            val commonPorts = intArrayOf(135, 445, 80)
-            commonPorts.any { port ->
-                try {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(host, port), timeout / 2)
-                        true
-                    }
-                } catch (_: Exception) { false }
-            }
-        } catch (_: Exception) { false }
     }
 
     private fun performRescanForNetwork(network: SavedNetwork, btn: Button) {
@@ -361,47 +398,25 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
             val subnetPrefix = myIp.substringBeforeLast(".")
             
-            val scanResults = withContext(Dispatchers.IO) {
-                (1..254).map { i ->
-                    async {
-                        val host = "$subnetPrefix.$i"
-                        try {
-                            if (isHostReachable(host, 600)) {
-                                val addr = InetAddress.getByName(host)
-                                val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
-                                val name = formatDeviceName(rawName, host)
-                                val type = identifyDeviceType(name, host)
-                                val mac = getMacFromArp(host)
-                                
-                                val typeId = db.networkDao().getTypeIdByName(type.name)
-                                val statusId = db.networkDao().getStatusIdByName("Active")
-
-                                SavedDevice(
-                                    networkId = network.id,
-                                    ip = host,
-                                    name = name,
-                                    originalName = if (rawName != "unknown") rawName else host,
-                                    macAddress = mac,
-                                    typeId = typeId,
-                                    statusId = statusId
-                                )
-                            } else null
-                        } catch (_: Exception) { null }
-                    }
-                }.awaitAll().filterNotNull()
-            }
+            val scanResults = repository.scanSubnet(subnetPrefix)
 
             withContext(Dispatchers.IO) {
                 scanResults.forEach { found ->
-                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.originalName)
+                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.device.originalName)
                     if (existing != null) {
                         db.networkDao().upsertDevice(existing.copy(
-                            ip = found.ip,
-                            macAddress = found.macAddress ?: existing.macAddress,
-                            statusId = found.statusId
+                            ip = found.device.ip,
+                            macAddress = found.device.macAddress ?: existing.macAddress,
+                            statusId = db.networkDao().getStatusIdByName("Active")
                         ))
                     } else {
-                        db.networkDao().upsertDevice(found)
+                        val typeId = db.networkDao().getTypeIdByName(repository.identifyDeviceType(found.device.name, found.device.ip).name)
+                        val statusId = db.networkDao().getStatusIdByName("Active")
+                        db.networkDao().upsertDevice(found.device.copy(
+                            networkId = network.id,
+                            typeId = typeId,
+                            statusId = statusId
+                        ))
                     }
                 }
                 
@@ -414,35 +429,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    private fun getMacFromArp(ip: String): String? {
-        try {
-            val address = InetAddress.getByName(ip)
-            val networkInterface = NetworkInterface.getByInetAddress(address)
-            if (networkInterface != null) {
-                val mac = networkInterface.hardwareAddress
-                if (mac != null) return mac.joinToString(":") { "%02X".format(it) }
-            }
-
-            val reader = BufferedReader(FileReader("/proc/net/arp"))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                if (line!!.contains(ip)) {
-                    val parts = line!!.split("\\s+".toRegex())
-                    if (parts.size >= 4 && parts[3].matches("..:..:..:..:..:..".toRegex())) {
-                        return parts[3].uppercase()
-                    }
-                }
-            }
-            reader.close()
-        } catch (_: Exception) { }
-        return null
-    }
-
     private fun showEditDeviceDialog(device: SavedDevice, onComplete: () -> Unit) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
         val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
+        val editSshUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
+        val editSshPassword = dialogView.findViewById<EditText>(R.id.editSshPassword)
         val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
 
         editName.setText(device.name)
@@ -451,6 +444,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             isEnabled = false
         }
         editMac.setText(device.macAddress ?: "")
+        editSshUser.setText(device.sshUsername ?: "")
+        editSshPassword.setText(device.sshPassword ?: "")
 
         val typeList = DeviceType.entries.map { it.name }
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList)
@@ -471,7 +466,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 val updated = device.copy(
                     name = editName.text.toString(),
                     typeId = typeId,
-                    macAddress = editMac.text.toString().trim().uppercase().ifBlank { null }
+                    macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
+                    sshUsername = editSshUser.text.toString().trim().ifBlank { null },
+                    sshPassword = editSshPassword.text.toString().ifBlank { null }
                 )
                 db.networkDao().updateDevice(updated)
                 withContext(Dispatchers.Main) {
@@ -546,47 +543,29 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         lifecycleScope.launch {
             val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() } ?: run {
                 Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
-                btnSave.isEnabled = true
                 return@launch
             }
 
+            // Show visual loading indicator
+            progressContainer.visibility = View.VISIBLE
+            btnScan.isEnabled = false
+
             val subnetPrefix = myIp.substringBeforeLast(".")
+            
+            // Perform scan on background thread
             val results = withContext(Dispatchers.IO) {
-                (1..254).map { i ->
-                    async {
-                        val host = "$subnetPrefix.$i"
-                        if (host == myIp) return@async null
-                        try {
-                            if (isHostReachable(host, 600)) {
-                                val addr = InetAddress.getByName(host)
-                                val rawName = if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
-                                val name = formatDeviceName(rawName, host)
-                                val type = identifyDeviceType(name, host)
-                                val mac = getMacFromArp(host)
-                                
-                                DeviceView(
-                                    device = SavedDevice(
-                                        networkId = 0,
-                                        ip = host,
-                                        name = name,
-                                        originalName = if (rawName != "unknown") rawName else host,
-                                        macAddress = mac,
-                                        typeId = 0,
-                                        statusId = 0
-                                    ),
-                                    typeEntity = DeviceTypeEntity(typeName = type.name),
-                                    statusEntity = DeviceStatusEntity(statusLabel = "Active")
-                                )
-                            } else null
-                        } catch (_: Exception) { null }
-                    }
-                }.awaitAll().filterNotNull()
+                repository.scanSubnet(subnetPrefix)
             }
 
+            // Update UI
             currentScanResults.clear()
             currentScanResults.addAll(results)
             currentDeviceAdapter.updateList(currentScanResults)
-            btnSave.isEnabled = true
+            
+            progressContainer.visibility = View.GONE
+            btnScan.isEnabled = true
+            btnSave.isEnabled = currentScanResults.isNotEmpty()
+
             Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
         }
     }
@@ -597,28 +576,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         return link?.linkAddresses?.firstOrNull {
             it.address is Inet4Address && !it.address.isLoopbackAddress
         }?.address?.hostAddress
-    }
-
-    private fun formatDeviceName(hostname: String, ip: String): String {
-        if (hostname == ip || hostname.equals("unknown", ignoreCase = true)) {
-            return "Generic Device"
-        }
-        return hostname.lowercase()
-            .removeSuffix(".local").removeSuffix(".home").removeSuffix(".lan")
-            .replaceFirstChar { it.uppercase() }
-    }
-
-    private fun identifyDeviceType(hostname: String, ip: String): DeviceType {
-        val h = hostname.lowercase()
-        val mobileKeywords = listOf("samsung", "galaxy", "iphone", "apple", "pixel", "google", "xiaomi", "redmi", "vivo", "oppo", "huawei", "honor", "motorola", "phone", "mobile", "android", "watch", "wearable")
-        return when {
-            h.contains("tv") || h.contains("chromecast") || h.contains("roku") -> DeviceType.TV
-            mobileKeywords.any { h.contains(it) } -> DeviceType.PHONE
-            h.contains("print") || h.contains("hp") || h.contains("epson") -> DeviceType.PRINTER
-            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") -> DeviceType.PC
-            h.contains("router") || h.contains("gateway") || ip.endsWith(".1") -> DeviceType.ROUTER
-            else -> DeviceType.OTHER
-        }
     }
 
     open class OnSwipeTouchListener(context: Context) : View.OnTouchListener {

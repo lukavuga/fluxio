@@ -64,7 +64,7 @@ object WakeOnLan {
      * - Windows: Install OpenSSH Server, enable it in Services.
      * - Linux: Install openssh-server.
      */
-    suspend fun shutdownPC(ipAddress: String, user: String, pass: String, isWindows: Boolean = true): Boolean {
+    suspend fun shutdownSsh(ipAddress: String, user: String, pass: String): Boolean {
         return withContext(Dispatchers.IO) {
             var session: Session? = null
             try {
@@ -78,8 +78,11 @@ object WakeOnLan {
                 session.timeout = 5000
                 session.connect()
 
+                // Windows shutdown command is standard. 
+                // Linux/Mac poweroff usually needs sudo or proper permissions.
+                // We try both common commands.
                 val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
-                val command = if (isWindows) "shutdown /s /f /t 0" else "sudo poweroff"
+                val command = "shutdown /s /f /t 0 || sudo poweroff || poweroff"
                 channel.setCommand(command)
                 channel.connect()
                 

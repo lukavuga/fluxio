@@ -4,14 +4,8 @@ import android.content.Context
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Enum representing supported device categories.
- */
-enum class DeviceType {
-    PC, PHONE, PRINTER, TV, ROUTER, LAPTOP, OTHER
-}
+enum class DeviceType { PC, PHONE, PRINTER, TV, ROUTER, LAPTOP, OTHER }
 
-// 1. Table for Networks
 @Entity(tableName = "networks")
 data class SavedNetwork(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -20,21 +14,18 @@ data class SavedNetwork(
     val deviceCount: Int = 0
 )
 
-// 2. Table for Device Types
 @Entity(tableName = "types")
 data class DeviceTypeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val typeName: String
 )
 
-// 3. Table for Statuses
 @Entity(tableName = "statuses")
 data class DeviceStatusEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val statusLabel: String
 )
 
-// 4. Table for Devices
 @Entity(
     tableName = "devices",
     indices = [Index(value = ["networkId", "macAddress"], unique = true)],
@@ -45,13 +36,14 @@ data class DeviceStatusEntity(
 data class SavedDevice(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val networkId: Long,
-    val ip: String,
     val name: String,
+    val ip: String,
+    val macAddress: String?,
     val typeId: Long,
     val statusId: Long,
     val originalName: String,
-    val macAddress: String?,
-    val isOnline: Boolean = false,
+    val sshUsername: String? = null,
+    val sshPassword: String? = null,
     val lastSeen: Long = System.currentTimeMillis()
 )
 
@@ -66,7 +58,7 @@ interface NetworkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertDevice(device: SavedDevice)
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert
     suspend fun insertNetwork(network: SavedNetwork): Long
 
     @Query("SELECT * FROM networks ORDER BY timestamp DESC")
@@ -76,8 +68,8 @@ interface NetworkDao {
     @Query("SELECT * FROM devices WHERE networkId = :netId")
     fun getDevicesWithDetails(netId: Long): Flow<List<DeviceView>>
 
-    @Query("SELECT * FROM devices WHERE networkId = :netId")
-    suspend fun getDevicesForNetwork(netId: Long): List<SavedDevice>
+    @Query("SELECT * FROM devices WHERE id = :id")
+    suspend fun getDeviceById(id: Long): SavedDevice?
 
     @Transaction
     @Query("SELECT * FROM devices WHERE id = :id")
@@ -104,11 +96,8 @@ interface NetworkDao {
     @Query("SELECT * FROM networks WHERE id = :id")
     suspend fun getNetworkById(id: Long): SavedNetwork?
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertType(type: DeviceTypeEntity): Long
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertStatus(status: DeviceStatusEntity): Long
+    @Query("SELECT * FROM devices WHERE networkId = :netId")
+    suspend fun getDevicesForNetwork(netId: Long): List<SavedDevice>
 
     @Query("SELECT id FROM types WHERE typeName = :name")
     suspend fun getTypeIdByName(name: String): Long
@@ -116,11 +105,14 @@ interface NetworkDao {
     @Query("SELECT id FROM statuses WHERE statusLabel = :name")
     suspend fun getStatusIdByName(name: String): Long
 
-    @Query("UPDATE devices SET isOnline = :online, lastSeen = :timestamp WHERE networkId = :netId")
-    suspend fun markAllOffline(netId: Long, online: Boolean = false, timestamp: Long = System.currentTimeMillis())
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertType(type: DeviceTypeEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertStatus(status: DeviceStatusEntity): Long
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class, DeviceTypeEntity::class, DeviceStatusEntity::class], version = 16)
+@Database(entities = [SavedNetwork::class, SavedDevice::class, DeviceTypeEntity::class, DeviceStatusEntity::class], version = 18)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
