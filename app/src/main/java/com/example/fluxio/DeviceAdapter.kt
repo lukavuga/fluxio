@@ -82,9 +82,10 @@ class DeviceAdapter(
             deviceIcon.setImageResource(iconRes)
             deviceIcon.clearColorFilter()
 
-            // 3. Power Control Button logic for PCs
+            // 3. Power Control Button and MAC visibility logic for PCs/Laptops
             if (typeName == "PC" || typeName == "LAPTOP") {
                 btnPowerControl.visibility = View.VISIBLE
+                deviceMac.visibility = View.VISIBLE
                 if (statusLabel == "Active" || statusLabel == "Online") {
                     btnPowerControl.text = itemView.context.getString(R.string.shutdown)
                 } else {
@@ -93,6 +94,7 @@ class DeviceAdapter(
                 btnPowerControl.setOnClickListener { onPowerControlClick(device) }
             } else {
                 btnPowerControl.visibility = View.GONE
+                deviceMac.visibility = View.GONE
             }
 
             itemView.setOnClickListener { onItemClick(device) }

@@ -9,27 +9,31 @@ import java.io.FileReader
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.regex.Pattern
 
 class NetworkRepository(private val db: AppDatabase) {
 
-    private val macRegex = Pattern.compile("..:..:..:..:..:..")
-
     /**
      * Reads the ARP table at /proc/net/arp to find the MAC address for a given IP.
+     * Robust implementation that filters out invalid entries and handles various formats.
      */
     fun getMacAddress(ip: String): String? {
         try {
             val reader = BufferedReader(FileReader("/proc/net/arp"))
             var line: String?
+            // Skip the header line
+            reader.readLine() 
             while (reader.readLine().also { line = it } != null) {
-                if (line!!.contains(ip)) {
-                    val parts = line!!.split("\\s+".toRegex())
-                    if (parts.size >= 4) {
-                        val mac = parts[3].uppercase()
-                        if (macRegex.matcher(mac).matches() && mac != "00:00:00:00:00:00") {
-                            return mac
-                        }
+                val parts = line!!.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                
+                // Format in /proc/net/arp:
+                // IP address       HW type     Flags       HW address          Mask     Device
+                // 192.168.1.10     0x1         0x2         aa:bb:cc:dd:ee:ff   *        wlan0
+                
+                if (parts.size >= 4 && parts[0] == ip) {
+                    val mac = parts[3].uppercase()
+                    // Filter out null/invalid MACs commonly found in ARP tables
+                    if (mac != "00:00:00:00:00:00" && mac.contains(":") && mac.length >= 11) {
+                        return mac
                     }
                 }
             }
@@ -43,9 +47,10 @@ class NetworkRepository(private val db: AppDatabase) {
     fun isHostReachable(host: String, timeout: Int): Boolean {
         return try {
             val addr = InetAddress.getByName(host)
+            // isReachable can be unreliable on Android without root, so we check common ports too
             if (addr.isReachable(timeout)) return true
             
-            val commonPorts = intArrayOf(135, 445, 80, 22)
+            val commonPorts = intArrayOf(135, 445, 80, 22, 443, 8080)
             commonPorts.any { port ->
                 try {
                     Socket().use { socket ->
@@ -66,6 +71,7 @@ class NetworkRepository(private val db: AppDatabase) {
                 val host = "$subnetPrefix.$i"
                 try {
                     if (isHostReachable(host, timeoutMs)) {
+                        // Immediately fetch MAC after host is confirmed reachable
                         val mac = getMacAddress(host)
                         
                         val rawName = try {

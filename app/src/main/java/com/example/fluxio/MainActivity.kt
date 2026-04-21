@@ -12,12 +12,15 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.viewModels
 import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -47,6 +50,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var currentDeviceAdapter: DeviceAdapter
     
     private var activeDetailsDialog: AlertDialog? = null
+
+    private val pairingViewModel: PairingViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return PairingViewModel(db) as T
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -125,11 +137,111 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         lifecycleScope.launch(Dispatchers.IO) {
             initLookupTables()
         }
+
+        observePairingEvents()
+        pairingViewModel.startListening()
+    }
+
+    private fun observePairingEvents() {
+        lifecycleScope.launch {
+            pairingViewModel.pairingEvent.collect { event ->
+                when (event) {
+                    is PairingViewModel.PairingEvent.DeviceFound -> {
+                        showPairingDialog(event.ip, event.mac)
+                    }
+                    is PairingViewModel.PairingEvent.Success -> {
+                        Toast.makeText(this@MainActivity, "Device ${event.name} paired successfully!", Toast.LENGTH_LONG).show()
+                        loadSavedNetworks()
+                    }
+                    is PairingViewModel.PairingEvent.Error -> {
+                        Toast.makeText(this@MainActivity, "Pairing Error: ${event.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showPairingDialog(ip: String, mac: String) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
+        val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
+        val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
+        val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
+        val editSshUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
+        val editSshPassword = dialogView.findViewById<EditText>(R.id.editSshPassword)
+        val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val btnSavePairing = dialogView.findViewById<Button>(R.id.btnSaveChanges)
+        val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteDevice)
+        val txtTitle = dialogView.findViewById<TextView>(R.id.txtEditTitle)
+
+        txtTitle?.text = "New Device Found!"
+        btnDelete.visibility = View.GONE
+        btnSavePairing.text = "PAIR DEVICE"
+
+        editIp.setText(ip)
+        editIp.isEnabled = false
+        editMac.setText(mac)
+        editMac.isEnabled = false
+        editName.hint = "Enter Device Name"
+
+        val typeList = DeviceType.entries.map { it.name }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = adapter
+        spinner.setSelection(typeList.indexOf("PC"))
+
+        // Update visibility based on initial type (PC)
+        updateMacFieldVisibility(spinner.selectedItem.toString(), editMac)
+
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateMacFieldVisibility(parent?.getItemAtPosition(position).toString(), editMac)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(true)
+            .create()
+
+        btnSavePairing.setOnClickListener {
+            val name = editName.text.toString()
+            if (name.isBlank()) {
+                Toast.makeText(this, "Please enter a name", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            lifecycleScope.launch {
+                val networks = withContext(Dispatchers.IO) { db.networkDao().getAllNetworks() }
+                if (networks.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "Please create a network first.", Toast.LENGTH_LONG).show()
+                } else {
+                    pairingViewModel.savePairedDevice(
+                        ip = ip,
+                        mac = if (editMac.visibility == View.VISIBLE) mac else null,
+                        customName = name,
+                        user = editSshUser.text.toString().ifBlank { null },
+                        pass = editSshPassword.text.toString().ifBlank { null },
+                        networkId = networks.first().id
+                    )
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun updateMacFieldVisibility(type: String, editMac: EditText) {
+        if (type == "PC" || type == "LAPTOP") {
+            editMac.visibility = View.VISIBLE
+        } else {
+            editMac.visibility = View.GONE
+        }
     }
 
     private fun setupGuideButtons() {
         findViewById<Button>(R.id.btnCopyWindowsScript).setOnClickListener {
-            val script = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\f.bat\""
+            val script = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\\\f.bat\""
             copyToClipboard(script, "Windows command copied")
         }
 
@@ -376,8 +488,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 val isActive = repository.isHostReachable(view.device.ip, 500)
                 val newStatusId = if (isActive) activeStatusId else inactiveStatusId
                 
-                if (view.device.statusId != newStatusId) {
-                    db.networkDao().updateDevice(view.device.copy(statusId = newStatusId))
+                // Update MAC address if missing
+                var updatedDevice = view.device
+                if (updatedDevice.macAddress.isNullOrBlank() && isActive) {
+                    val mac = repository.getMacAddress(updatedDevice.ip)
+                    if (mac != null) {
+                        updatedDevice = updatedDevice.copy(macAddress = mac)
+                    }
+                }
+
+                if (updatedDevice.statusId != newStatusId || updatedDevice.macAddress != view.device.macAddress) {
+                    db.networkDao().updateDevice(updatedDevice.copy(statusId = newStatusId))
                 }
             }
         }
@@ -406,7 +527,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     if (existing != null) {
                         db.networkDao().upsertDevice(existing.copy(
                             ip = found.device.ip,
-                            macAddress = found.device.macAddress ?: existing.macAddress,
+                            macAddress = found.device.macAddress ?: existing.macAddress ?: repository.getMacAddress(found.device.ip),
                             statusId = db.networkDao().getStatusIdByName("Active")
                         ))
                     } else {
@@ -437,7 +558,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val editSshUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
         val editSshPassword = dialogView.findViewById<EditText>(R.id.editSshPassword)
         val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val txtTitle = dialogView.findViewById<TextView>(R.id.txtEditTitle)
 
+        txtTitle?.text = "Edit Device"
         editName.setText(device.name)
         editIp.apply {
             setText(device.ip)
@@ -456,6 +579,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val viewData = withContext(Dispatchers.IO) { db.networkDao().getDeviceViewByDeviceId(device.id) }
             val typeName = viewData?.typeEntity?.typeName ?: "OTHER"
             spinner.setSelection(typeList.indexOf(typeName.uppercase()))
+            
+            // Set initial visibility
+            updateMacFieldVisibility(typeName.uppercase(), editMac)
+        }
+
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateMacFieldVisibility(parent?.getItemAtPosition(position).toString(), editMac)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
         val dialog = AlertDialog.Builder(this).setView(dialogView).create()
@@ -466,7 +599,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 val updated = device.copy(
                     name = editName.text.toString(),
                     typeId = typeId,
-                    macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
+                    macAddress = if (editMac.visibility == View.VISIBLE) editMac.text.toString().trim().uppercase().ifBlank { null } else device.macAddress,
                     sshUsername = editSshUser.text.toString().trim().ifBlank { null },
                     sshPassword = editSshPassword.text.toString().ifBlank { null }
                 )
@@ -505,6 +638,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showDeviceInfoDialog(device: SavedDevice) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_info, null)
+        val txtMac = dialogView.findViewById<TextView>(R.id.txtDeviceMacDialog)
+        
         lifecycleScope.launch {
             val viewData = withContext(Dispatchers.IO) { db.networkDao().getDeviceViewByDeviceId(device.id) }
             
@@ -515,7 +650,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     findViewById<TextView>(R.id.txtDeviceTypeDialog).text = viewData?.typeEntity?.typeName ?: "OTHER"
                     findViewById<TextView>(R.id.txtDeviceStatusDialog).text = viewData?.statusEntity?.statusLabel ?: "Inactive"
                     
-                    val iconRes = when (viewData?.typeEntity?.typeName) {
+                    val typeName = viewData?.typeEntity?.typeName?.uppercase() ?: "OTHER"
+                    if (typeName == "PC" || typeName == "LAPTOP") {
+                        txtMac.visibility = View.VISIBLE
+                        txtMac.text = "MAC: ${device.macAddress ?: "Unknown"}"
+                    } else {
+                        txtMac.visibility = View.GONE
+                    }
+
+                    val iconRes = when (typeName) {
                         "TV" -> R.drawable.tv
                         "PHONE", "SMARTPHONE" -> R.drawable.phone
                         "PC", "LAPTOP" -> R.drawable.computer
@@ -553,13 +696,23 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val subnetPrefix = myIp.substringBeforeLast(".")
             
             // Perform scan on background thread
-            val results = withContext(Dispatchers.IO) {
+            val scanResults = withContext(Dispatchers.IO) {
                 repository.scanSubnet(subnetPrefix)
+            }
+            
+            // Enrich results with MAC addresses from existing table if missing in current scan
+            val enrichedResults = scanResults.map { view ->
+                if (view.device.macAddress.isNullOrBlank()) {
+                    val savedMac = db.networkDao().getMacForDevice(view.device.originalName, view.device.ip)
+                    if (savedMac != null) {
+                        view.copy(device = view.device.copy(macAddress = savedMac))
+                    } else view
+                } else view
             }
 
             // Update UI
             currentScanResults.clear()
-            currentScanResults.addAll(results)
+            currentScanResults.addAll(enrichedResults)
             currentDeviceAdapter.updateList(currentScanResults)
             
             progressContainer.visibility = View.GONE

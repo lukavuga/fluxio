@@ -78,6 +78,9 @@ interface NetworkDao {
     @Query("SELECT * FROM devices WHERE networkId = :netId AND originalName = :name LIMIT 1")
     suspend fun getDeviceByOriginalName(netId: Long, name: String): SavedDevice?
 
+    @Query("SELECT macAddress FROM devices WHERE (originalName = :name OR ip = :ip) AND macAddress IS NOT NULL AND macAddress != '' LIMIT 1")
+    suspend fun getMacForDevice(name: String, ip: String): String?
+
     @Update
     suspend fun updateDevice(device: SavedDevice)
 

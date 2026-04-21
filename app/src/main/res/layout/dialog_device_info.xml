@@ -32,6 +32,16 @@
         tools:text="192.168.1.100" />
 
     <TextView
+        android:id="@+id/txtDeviceMacDialog"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
+        tools:text="MAC: AA:BB:CC:DD:EE:FF"
+        tools:visibility="visible" />
+
+    <TextView
         android:id="@+id/txtDeviceTypeDialog"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
