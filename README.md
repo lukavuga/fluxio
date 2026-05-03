@@ -1,5 +1,8 @@
 # 🌀 Fluxio
 
+> ⚠️ **UNDER DEVELOPMENT** ⚠️  
+> Projekt je še vedno v aktivnem razvoju. Funkcionalnosti se dodajajo, API se lahko spreminja, dokumentacija ni dokončana.
+
 **Fluxio** je sodobna Android aplikacija za upravljanje in nadzor pametnih naprav v lokalnem omrežju in na daljavo.  
 Ime izhaja iz latinske besede *fluxus* (pretok), kar simbolizira nemoten pretok podatkov in energije v pametnem domu.
 
@@ -34,7 +37,7 @@ Ime izhaja iz latinske besede *fluxus* (pretok), kar simbolizira nemoten pretok 
 - **Jezik:** Kotlin  
 - **Baza podatkov:** Room Database (relacijska struktura s tujimi ključi)  
 - **Arhitektura:** MVVM (Model-View-ViewModel)
-- 
+
 ---
 
 ## 🔧 Namestitev in konfiguracija
