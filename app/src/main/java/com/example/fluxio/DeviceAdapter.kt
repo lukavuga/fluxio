@@ -11,12 +11,12 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 
 /**
- * Adapter that displays devices using the relational DeviceView (Device + Type + Status).
+ * Adapter that displays devices using SupabaseDevice.
  */
 class DeviceAdapter(
-    private var deviceViews: MutableList<DeviceView>,
-    private val onItemClick: (SavedDevice) -> Unit,
-    private val onPowerControlClick: (SavedDevice) -> Unit
+    private var devices: MutableList<SupabaseDevice>,
+    private val onItemClick: (SupabaseDevice) -> Unit,
+    private val onPowerControlClick: (SupabaseDevice) -> Unit
 ) : RecyclerView.Adapter<DeviceAdapter.DeviceViewHolder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DeviceViewHolder {
@@ -25,17 +25,17 @@ class DeviceAdapter(
     }
 
     override fun onBindViewHolder(holder: DeviceViewHolder, position: Int) {
-        val viewItem = deviceViews[position]
-        holder.bind(viewItem, onItemClick, onPowerControlClick)
+        val device = devices[position]
+        holder.bind(device, onItemClick, onPowerControlClick)
     }
 
-    override fun getItemCount(): Int = deviceViews.size
+    override fun getItemCount(): Int = devices.size
 
-    fun updateList(newDeviceViews: List<DeviceView>) {
-        val diffCallback = DeviceDiffCallback(deviceViews, newDeviceViews)
+    fun updateList(newDevices: List<SupabaseDevice>) {
+        val diffCallback = DeviceDiffCallback(devices, newDevices)
         val diffResult = DiffUtil.calculateDiff(diffCallback)
-        deviceViews.clear()
-        deviceViews.addAll(newDeviceViews)
+        devices.clear()
+        devices.addAll(newDevices)
         diffResult.dispatchUpdatesTo(this)
     }
 
@@ -48,29 +48,25 @@ class DeviceAdapter(
         private val btnPowerControl: Button = itemView.findViewById(R.id.btnPowerControl)
 
         fun bind(
-            viewItem: DeviceView,
-            onItemClick: (SavedDevice) -> Unit,
-            onPowerControlClick: (SavedDevice) -> Unit
+            device: SupabaseDevice,
+            onItemClick: (SupabaseDevice) -> Unit,
+            onPowerControlClick: (SupabaseDevice) -> Unit
         ) {
-            val device = viewItem.device
-            val typeName = viewItem.typeEntity?.typeName?.uppercase() ?: "OTHER"
-            val statusLabel = viewItem.statusEntity?.statusLabel ?: "Inactive"
+            val typeName = device.type?.uppercase() ?: "OTHER"
+            val statusLabel = device.status ?: "Offline"
 
             deviceName.text = device.name
-            deviceIp.text = device.ip
+            deviceIp.text = device.ipAddress
             
-            // Actually display the MAC address from the database
             deviceMac.text = if (!device.macAddress.isNullOrBlank()) "MAC: ${device.macAddress}" else "MAC: Unknown"
             deviceStatus.text = statusLabel
 
-            // 1. Set status color
-            if (statusLabel == "Active" || statusLabel == "Online") {
+            if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
                 deviceStatus.setTextColor("#00E676".toColorInt()) // Neon Green
             } else {
                 deviceStatus.setTextColor("#FF1744".toColorInt()) // Neon Red
             }
 
-            // 2. Select correct icon based on type name string
             val iconRes = when (typeName) {
                 "TV" -> R.drawable.tv
                 "SMARTPHONE", "PHONE" -> R.drawable.phone
@@ -82,11 +78,10 @@ class DeviceAdapter(
             deviceIcon.setImageResource(iconRes)
             deviceIcon.clearColorFilter()
 
-            // 3. Power Control Button and MAC visibility logic for PCs/Laptops
             if (typeName == "PC" || typeName == "LAPTOP") {
                 btnPowerControl.visibility = View.VISIBLE
                 deviceMac.visibility = View.VISIBLE
-                if (statusLabel == "Active" || statusLabel == "Online") {
+                if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
                     btnPowerControl.text = itemView.context.getString(R.string.shutdown)
                 } else {
                     btnPowerControl.text = itemView.context.getString(R.string.power_on)
@@ -102,21 +97,22 @@ class DeviceAdapter(
     }
 
     class DeviceDiffCallback(
-        private val oldList: List<DeviceView>,
-        private val newList: List<DeviceView>
+        private val oldList: List<SupabaseDevice>,
+        private val newList: List<SupabaseDevice>
     ) : DiffUtil.Callback() {
         override fun getOldListSize() = oldList.size
         override fun getNewListSize() = newList.size
         override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-            return oldList[oldItemPosition].device.id == newList[newItemPosition].device.id
+            return oldList[oldItemPosition].macAddress == newList[newItemPosition].macAddress
         }
         override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
             val old = oldList[oldItemPosition]
             val new = newList[newItemPosition]
-            return old.device.ip == new.device.ip && 
-                   old.device.macAddress == new.device.macAddress &&
-                   old.statusEntity?.statusLabel == new.statusEntity?.statusLabel &&
-                   old.typeEntity?.typeName == new.typeEntity?.typeName
+            return old.ipAddress == new.ipAddress && 
+                   old.macAddress == new.macAddress &&
+                   old.status == new.status &&
+                   old.type == new.type &&
+                   old.name == new.name
         }
     }
 }

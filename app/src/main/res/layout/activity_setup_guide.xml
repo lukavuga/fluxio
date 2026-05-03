@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/flux_background">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/setupToolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/flux_card"
+            app:title="How to Setup"
+            app:titleTextColor="@color/flux_neon_blue" />
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Fluxio Setup Guide"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:textColor="@color/flux_neon_blue"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Step 1 Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_green"
+                app:strokeWidth="1dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 1: Connect to Local Network"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_green"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Ensure your Android device is connected to the same Wi-Fi network as the computers you wish to manage."
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 2 Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_green"
+                app:strokeWidth="1dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 2: Scan for Devices"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_green"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Tap the Scan button on the main screen to discover devices in your local network."
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 3 Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_green"
+                app:strokeWidth="1dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 3: Save to Cloud"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_green"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Tap Save to register discovered devices in Supabase for remote management."
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 4 Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_green"
+                app:strokeWidth="1dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 4: BIOS Configuration"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_green"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Enable Wake-on-LAN in your computer's BIOS/UEFI settings (Power Management -> PCI-E Wake)."
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 5 Card (The most complex one) -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_blue"
+                app:strokeWidth="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 5: Run Deployment Script"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_blue"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Deploy the agent script on your PC to link it with the cloud database."
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Windows -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+                        <Button
+                            android:id="@+id/btnDownloadWin"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Windows Script"
+                            android:textColor="@color/text_primary"
+                            app:icon="@drawable/computer"
+                            app:iconTint="@color/flux_neon_blue" />
+                        <ImageButton
+                            android:id="@+id/btnShareWin"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@android:drawable/ic_menu_share"
+                            app:tint="@color/flux_neon_blue" />
+                    </LinearLayout>
+
+                    <!-- Linux -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+                        <Button
+                            android:id="@+id/btnDownloadLinux"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Linux Script"
+                            android:textColor="@color/text_primary"
+                            app:icon="@drawable/computer"
+                            app:iconTint="@color/flux_neon_blue" />
+                        <ImageButton
+                            android:id="@+id/btnShareLinux"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@android:drawable/ic_menu_share"
+                            app:tint="@color/flux_neon_blue" />
+                    </LinearLayout>
+
+                    <!-- macOS -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+                        <Button
+                            android:id="@+id/btnDownloadMac"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="macOS Script"
+                            android:textColor="@color/text_primary"
+                            app:icon="@drawable/computer"
+                            app:iconTint="@color/flux_neon_blue" />
+                        <ImageButton
+                            android:id="@+id/btnShareMac"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@android:drawable/ic_menu_share"
+                            app:tint="@color/flux_neon_blue" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 6 Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp"
+                app:cardBackgroundColor="@color/flux_card"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="@color/flux_neon_green"
+                app:strokeWidth="1dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Step 6: Remote Control"
+                        android:textStyle="bold"
+                        android:textColor="@color/flux_neon_green"
+                        android:textSize="18sp"
+                        android:layout_marginBottom="8dp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="You're all set! Control your devices from anywhere via the cloud status monitoring."
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <Button
+                android:id="@+id/btnFinishSetup"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:text="GET STARTED"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:backgroundTint="@color/flux_neon_blue"
+                android:textColor="@color/black"
+                app:cornerRadius="12dp" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

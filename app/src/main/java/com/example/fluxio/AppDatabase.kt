@@ -44,7 +44,9 @@ data class SavedDevice(
     val originalName: String,
     val sshUsername: String? = null,
     val sshPassword: String? = null,
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeen: Long = System.currentTimeMillis(),
+    val pendingCommand: String? = null,
+    val supabaseId: String? = null
 )
 
 data class DeviceView(
@@ -113,9 +115,15 @@ interface NetworkDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertStatus(status: DeviceStatusEntity): Long
+    
+    @Query("UPDATE devices SET pendingCommand = :command WHERE id = :deviceId")
+    suspend fun updatePendingCommand(deviceId: Long, command: String?)
+
+    @Query("UPDATE devices SET statusId = :statusId WHERE macAddress = :mac")
+    suspend fun updateStatusByMac(mac: String, statusId: Long)
 }
 
-@Database(entities = [SavedNetwork::class, SavedDevice::class, DeviceTypeEntity::class, DeviceStatusEntity::class], version = 18)
+@Database(entities = [SavedNetwork::class, SavedDevice::class, DeviceTypeEntity::class, DeviceStatusEntity::class], version = 19)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao

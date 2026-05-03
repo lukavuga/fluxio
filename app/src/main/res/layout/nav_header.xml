@@ -23,9 +23,10 @@
         android:textColor="#FFFFFF"/>
 
     <TextView
+        android:id="@+id/textViewUserEmail"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Network Scanner"
+        android:text="Not logged in"
         android:textColor="#AAAAAA"/>
 
 </LinearLayout>

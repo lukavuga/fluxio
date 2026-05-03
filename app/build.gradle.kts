@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -34,6 +35,9 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+    buildFeatures {
+        viewBinding = true
+    }
 }
 
 dependencies {
@@ -41,7 +45,6 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.activity)
-    // Add activity-ktx for by viewModels()
     implementation("androidx.activity:activity-ktx:1.8.0")
     implementation(libs.androidx.constraintlayout)
     testImplementation(libs.junit)
@@ -53,9 +56,17 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // --- SSH ---
+    // --- SSH (Legacy, might be removed later) ---
     implementation(libs.jsch)
 
     // --- WORK MANAGER ---
     implementation(libs.androidx.work.runtime.ktx)
+
+    // --- SUPABASE ---
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.realtime)
+    implementation(libs.supabase.auth)
+    implementation(libs.ktor.client.android)
+    implementation(libs.kotlinx.serialization.json)
 }

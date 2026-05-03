@@ -10,11 +10,10 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 
-class NetworkRepository(private val db: AppDatabase) {
+class NetworkRepository {
 
     /**
      * Reads the ARP table at /proc/net/arp to find the MAC address for a given IP.
-     * Robust implementation that filters out invalid entries and handles various formats.
      */
     fun getMacAddress(ip: String): String? {
         try {
@@ -25,13 +24,8 @@ class NetworkRepository(private val db: AppDatabase) {
             while (reader.readLine().also { line = it } != null) {
                 val parts = line!!.split("\\s+".toRegex()).filter { it.isNotBlank() }
                 
-                // Format in /proc/net/arp:
-                // IP address       HW type     Flags       HW address          Mask     Device
-                // 192.168.1.10     0x1         0x2         aa:bb:cc:dd:ee:ff   *        wlan0
-                
                 if (parts.size >= 4 && parts[0] == ip) {
                     val mac = parts[3].uppercase()
-                    // Filter out null/invalid MACs commonly found in ARP tables
                     if (mac != "00:00:00:00:00:00" && mac.contains(":") && mac.length >= 11) {
                         return mac
                     }
@@ -47,7 +41,6 @@ class NetworkRepository(private val db: AppDatabase) {
     fun isHostReachable(host: String, timeout: Int): Boolean {
         return try {
             val addr = InetAddress.getByName(host)
-            // isReachable can be unreliable on Android without root, so we check common ports too
             if (addr.isReachable(timeout)) return true
             
             val commonPorts = intArrayOf(135, 445, 80, 22, 443, 8080)
@@ -63,15 +56,14 @@ class NetworkRepository(private val db: AppDatabase) {
     }
 
     /**
-     * Scans the subnet for active devices, retrieves their MACs and hostnames.
+     * Scans the subnet for active devices.
      */
-    suspend fun scanSubnet(subnetPrefix: String, timeoutMs: Int = 1000): List<DeviceView> = withContext(Dispatchers.IO) {
+    suspend fun scanSubnet(subnetPrefix: String, timeoutMs: Int = 1000): List<SupabaseDevice> = withContext(Dispatchers.IO) {
         (1..254).map { i ->
             async {
                 val host = "$subnetPrefix.$i"
                 try {
                     if (isHostReachable(host, timeoutMs)) {
-                        // Immediately fetch MAC after host is confirmed reachable
                         val mac = getMacAddress(host)
                         
                         val rawName = try {
@@ -82,18 +74,13 @@ class NetworkRepository(private val db: AppDatabase) {
                         val formattedName = formatDeviceName(rawName, host)
                         val type = identifyDeviceType(formattedName, host)
                         
-                        DeviceView(
-                            device = SavedDevice(
-                                networkId = 0,
-                                ip = host,
-                                name = formattedName,
-                                originalName = if (rawName != "unknown") rawName else host,
-                                macAddress = mac,
-                                typeId = 0,
-                                statusId = 0
-                            ),
-                            typeEntity = DeviceTypeEntity(typeName = type.name),
-                            statusEntity = DeviceStatusEntity(statusLabel = "Active")
+                        SupabaseDevice(
+                            networkId = "", // Assigned when saving
+                            ipAddress = host,
+                            name = formattedName,
+                            macAddress = mac,
+                            status = "Online",
+                            type = type.name
                         )
                     } else null
                 } catch (e: Exception) {

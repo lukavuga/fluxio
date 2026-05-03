@@ -1,13 +1,10 @@
 package com.example.fluxio
 
-import com.jcraft.jsch.JSch
-import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.util.Properties
 
 object WakeOnLan {
     private const val WOL_PORT = 9
@@ -56,43 +53,5 @@ object WakeOnLan {
             throw IllegalArgumentException("Invalid hex digit in MAC address.")
         }
         return bytes
-    }
-
-    /**
-     * Shuts down a remote PC using SSH.
-     * Required setup on target: 
-     * - Windows: Install OpenSSH Server, enable it in Services.
-     * - Linux: Install openssh-server.
-     */
-    suspend fun shutdownSsh(ipAddress: String, user: String, pass: String): Boolean {
-        return withContext(Dispatchers.IO) {
-            var session: Session? = null
-            try {
-                val jsch = JSch()
-                session = jsch.getSession(user, ipAddress, 22)
-                session.setPassword(pass)
-
-                val config = Properties()
-                config["StrictHostKeyChecking"] = "no"
-                session.setConfig(config)
-                session.timeout = 5000
-                session.connect()
-
-                // Windows shutdown command is standard. 
-                // Linux/Mac poweroff usually needs sudo or proper permissions.
-                // We try both common commands.
-                val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
-                val command = "shutdown /s /f /t 0 || sudo poweroff || poweroff"
-                channel.setCommand(command)
-                channel.connect()
-                
-                true
-            } catch (e: Exception) {
-                e.printStackTrace()
-                false
-            } finally {
-                session?.disconnect()
-            }
-        }
     }
 }

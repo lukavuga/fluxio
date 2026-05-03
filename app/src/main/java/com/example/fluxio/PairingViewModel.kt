@@ -13,7 +13,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.util.Properties
 
-class PairingViewModel(private val db: AppDatabase) : ViewModel() {
+class PairingViewModel(private val supabaseRepository: SupabaseRepository) : ViewModel() {
 
     private val _pairingEvent = MutableSharedFlow<PairingEvent>()
     val pairingEvent = _pairingEvent.asSharedFlow()
@@ -22,7 +22,6 @@ class PairingViewModel(private val db: AppDatabase) : ViewModel() {
 
     /**
      * Starts listening for UDP broadcast messages on port 8888.
-     * Payload expected: "FLUXIO_PAIR:MAC_ADDRESS"
      */
     fun startListening() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -39,8 +38,6 @@ class PairingViewModel(private val db: AppDatabase) : ViewModel() {
                     if (message.startsWith("FLUXIO_PAIR:")) {
                         val mac = message.substringAfter("FLUXIO_PAIR:").uppercase()
                         val ip = packet.address.hostAddress ?: ""
-                        
-                        // Emit event to UI to show discovery dialog
                         _pairingEvent.emit(PairingEvent.DeviceFound(ip, mac))
                     }
                 }
@@ -60,7 +57,7 @@ class PairingViewModel(private val db: AppDatabase) : ViewModel() {
     }
 
     /**
-     * Finalizes the pairing process by verifying SSH and saving the device to Room.
+     * Saves the paired device to Supabase.
      */
     fun savePairedDevice(
         ip: String,
@@ -68,34 +65,28 @@ class PairingViewModel(private val db: AppDatabase) : ViewModel() {
         customName: String,
         user: String?,
         pass: String?,
-        networkId: Long
+        networkId: String
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Verify SSH connection if credentials are provided
                 if (!user.isNullOrBlank() && !pass.isNullOrBlank()) {
                     val verified = verifySshConnection(ip, user, pass)
                     if (!verified) {
-                        _pairingEvent.emit(PairingEvent.Error("SSH Verification Failed! Please check credentials."))
+                        _pairingEvent.emit(PairingEvent.Error("SSH Verification Failed!"))
                         return@launch
                     }
                 }
 
-                val typeId = db.networkDao().getTypeIdByName("PC")
-                val statusId = db.networkDao().getStatusIdByName("Active")
-                
-                val device = SavedDevice(
+                val device = SupabaseDevice(
                     networkId = networkId,
                     name = customName,
-                    ip = ip,
+                    ipAddress = ip,
                     macAddress = mac,
-                    typeId = typeId,
-                    statusId = statusId,
-                    originalName = customName,
-                    sshUsername = user,
-                    sshPassword = pass
+                    status = "Online",
+                    type = "PC"
+                    // Note: SSH credentials should ideally be encrypted or handled securely in a separate table/field
                 )
-                db.networkDao().upsertDevice(device)
+                supabaseRepository.upsertDevice(device)
                 _pairingEvent.emit(PairingEvent.Success(customName))
             } catch (e: Exception) {
                 _pairingEvent.emit(PairingEvent.Error("Failed to save device: ${e.message}"))
@@ -116,7 +107,6 @@ class PairingViewModel(private val db: AppDatabase) : ViewModel() {
             session.connect()
             session.isConnected
         } catch (e: Exception) {
-            e.printStackTrace()
             false
         } finally {
             session?.disconnect()

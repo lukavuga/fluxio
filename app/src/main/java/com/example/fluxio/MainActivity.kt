@@ -2,6 +2,7 @@ package com.example.fluxio
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
@@ -12,15 +13,13 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
-import androidx.activity.viewModels
 import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
+import androidx.core.widget.NestedScrollView
 import androidx.drawerlayout.widget.DrawerLayout
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -37,41 +36,48 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var layoutCurrent: LinearLayout
     private lateinit var layoutSaved: LinearLayout
-    private lateinit var layoutSetup: ScrollView
+    private lateinit var layoutSetup: NestedScrollView
     private lateinit var progressContainer: LinearLayout
     private lateinit var btnScan: Button
     private lateinit var btnSave: Button
     private lateinit var recyclerCurrent: RecyclerView
     private lateinit var recyclerSaved: RecyclerView
+    private lateinit var navView: NavigationView
 
-    private lateinit var db: AppDatabase
     private lateinit var repository: NetworkRepository
-    private val currentScanResults = mutableListOf<DeviceView>()
+    private lateinit var supabaseRepository: SupabaseRepository
+    private lateinit var authRepository: AuthRepository
+    
+    private val currentScanResults = mutableListOf<SupabaseDevice>()
     private lateinit var currentDeviceAdapter: DeviceAdapter
     
     private var activeDetailsDialog: AlertDialog? = null
-
-    private val pairingViewModel: PairingViewModel by viewModels {
-        object : ViewModelProvider.Factory {
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                @Suppress("UNCHECKED_CAST")
-                return PairingViewModel(db) as T
-            }
-        }
-    }
+    private var currentViewingNetwork: SupabaseNetwork? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        
+        supabaseRepository = SupabaseRepository(
+            supabaseUrl = "https://vbpmfulxbpcuboirjokv.supabase.co",
+            supabaseKey = "sb_publishable_RtG4GlKSSxRk3fCLYfXwjA_a-d50Yvp"
+        )
+        authRepository = AuthRepository(supabaseRepository.client)
 
-        db = AppDatabase.getDatabase(this)
-        repository = NetworkRepository(db)
+        // Session Management: Check if user is logged in
+        if (!authRepository.isUserLoggedIn()) {
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+
+        setContentView(R.layout.activity_main)
+        repository = NetworkRepository()
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
 
         drawerLayout = findViewById(R.id.drawer_layout)
-        val navView = findViewById<NavigationView>(R.id.nav_view)
+        navView = findViewById<NavigationView>(R.id.nav_view)
         layoutCurrent = findViewById(R.id.layoutCurrentNetwork)
         layoutSaved = findViewById(R.id.layoutSavedNetworks)
         layoutSetup = findViewById(R.id.layoutSetupGuide)
@@ -103,7 +109,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         toggle.syncState()
 
         navView.setNavigationItemSelectedListener(this)
-        navView.setCheckedItem(R.id.nav_current)
+        
+        // Display user email in drawer header if needed
+        val headerView = navView.getHeaderView(0)
+        headerView.findViewById<TextView>(R.id.textViewUserEmail)?.text = authRepository.currentUserEmail()
 
         setupFullScreenSwipe()
 
@@ -111,6 +120,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             override fun handleOnBackPressed() {
                 if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
                     drawerLayout.closeDrawer(GravityCompat.START)
+                } else if (layoutSetup.visibility == View.VISIBLE || layoutSaved.visibility == View.VISIBLE) {
+                    showCurrentNetwork()
                 } else {
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
@@ -129,130 +140,99 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             showSaveDialog()
         }
 
-        setupGuideButtons()
+        setupSetupGuideHandlers()
+
+        // Onboarding Check
+        val prefs = getSharedPreferences("fluxio_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("first_run", true)) {
+            showSetupGuide()
+        } else {
+            showCurrentNetwork()
+        }
 
         checkWifiConnection()
         checkConnectivity()
-        
-        lifecycleScope.launch(Dispatchers.IO) {
-            initLookupTables()
-        }
 
-        observePairingEvents()
-        pairingViewModel.startListening()
+        observeSupabaseChanges()
     }
 
-    private fun observePairingEvents() {
+    private fun showCurrentNetwork() {
+        layoutCurrent.visibility = View.VISIBLE
+        layoutSaved.visibility = View.GONE
+        layoutSetup.visibility = View.GONE
+        supportActionBar?.title = getString(R.string.title_current)
+        navView.setCheckedItem(R.id.nav_current)
+    }
+
+    private fun showSavedNetworks() {
+        layoutCurrent.visibility = View.GONE
+        layoutSaved.visibility = View.VISIBLE
+        layoutSetup.visibility = View.GONE
+        supportActionBar?.title = getString(R.string.title_saved)
+        navView.setCheckedItem(R.id.nav_saved)
+        loadSavedNetworks()
+    }
+
+    private fun showSetupGuide() {
+        layoutCurrent.visibility = View.GONE
+        layoutSaved.visibility = View.GONE
+        layoutSetup.visibility = View.VISIBLE
+        supportActionBar?.title = "How to Setup"
+        navView.setCheckedItem(R.id.nav_setup)
+    }
+
+    private fun setupSetupGuideHandlers() {
+        val winScript = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\\\f.bat\""
+        val linuxScript = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_linux.sh | sudo bash"
+        val macScript = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_mac.sh | zsh"
+
+        val winUrl = "https://raw.githubusercontent.com/lukavuga/fluxio/main/setup_windows.ps1"
+        val linuxUrl = "https://raw.githubusercontent.com/lukavuga/fluxio/main/setup_linux.sh"
+        val macUrl = "https://raw.githubusercontent.com/lukavuga/fluxio/main/setup_mac.sh"
+
+        findViewById<Button>(R.id.btnCopyWindowsScript).setOnClickListener { copyToClipboard(winScript, "Windows command copied") }
+        findViewById<Button>(R.id.btnCopyLinuxScript).setOnClickListener { copyToClipboard(linuxScript, "Linux command copied") }
+        findViewById<Button>(R.id.btnCopyMacScript).setOnClickListener { copyToClipboard(macScript, "macOS command copied") }
+
+        findViewById<ImageButton>(R.id.btnShareWin).setOnClickListener { shareUrl(winUrl, "Windows") }
+        findViewById<ImageButton>(R.id.btnShareLinux).setOnClickListener { shareUrl(linuxUrl, "Linux") }
+        findViewById<ImageButton>(R.id.btnShareMac).setOnClickListener { shareUrl(macUrl, "macOS") }
+
+        findViewById<Button>(R.id.btnFinishSetup).setOnClickListener {
+            val prefs = getSharedPreferences("fluxio_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("first_run", false).apply()
+            showCurrentNetwork()
+        }
+    }
+
+    private fun shareUrl(url: String, os: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Fluxio $os Setup Script")
+            putExtra(Intent.EXTRA_TEXT, "Here is the Fluxio setup script for $os: $url")
+        }
+        startActivity(Intent.createChooser(intent, "Share Script Link"))
+    }
+
+    private fun observeSupabaseChanges() {
         lifecycleScope.launch {
-            pairingViewModel.pairingEvent.collect { event ->
-                when (event) {
-                    is PairingViewModel.PairingEvent.DeviceFound -> {
-                        showPairingDialog(event.ip, event.mac)
+            supabaseRepository.observeDeviceChanges().collect { supabaseDevice ->
+                // Update current scan results if applicable
+                val scanIndex = currentScanResults.indexOfFirst { it.macAddress == supabaseDevice.macAddress }
+                if (scanIndex != -1) {
+                    currentScanResults[scanIndex] = supabaseDevice
+                    withContext(Dispatchers.Main) {
+                        currentDeviceAdapter.updateList(ArrayList(currentScanResults))
                     }
-                    is PairingViewModel.PairingEvent.Success -> {
-                        Toast.makeText(this@MainActivity, "Device ${event.name} paired successfully!", Toast.LENGTH_LONG).show()
-                        loadSavedNetworks()
-                    }
-                    is PairingViewModel.PairingEvent.Error -> {
-                        Toast.makeText(this@MainActivity, "Pairing Error: ${event.message}", Toast.LENGTH_SHORT).show()
+                }
+                
+                // If viewing a specific network, refresh its devices
+                if (currentViewingNetwork?.id == supabaseDevice.networkId) {
+                    withContext(Dispatchers.Main) {
+                        refreshNetworkDetails(currentViewingNetwork!!)
                     }
                 }
             }
-        }
-    }
-
-    private fun showPairingDialog(ip: String, mac: String) {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
-        val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
-        val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
-        val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
-        val editSshUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
-        val editSshPassword = dialogView.findViewById<EditText>(R.id.editSshPassword)
-        val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
-        val btnSavePairing = dialogView.findViewById<Button>(R.id.btnSaveChanges)
-        val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteDevice)
-        val txtTitle = dialogView.findViewById<TextView>(R.id.txtEditTitle)
-
-        txtTitle?.text = "New Device Found!"
-        btnDelete.visibility = View.GONE
-        btnSavePairing.text = "PAIR DEVICE"
-
-        editIp.setText(ip)
-        editIp.isEnabled = false
-        editMac.setText(mac)
-        editMac.isEnabled = false
-        editName.hint = "Enter Device Name"
-
-        val typeList = DeviceType.entries.map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinner.adapter = adapter
-        spinner.setSelection(typeList.indexOf("PC"))
-
-        // Update visibility based on initial type (PC)
-        updateMacFieldVisibility(spinner.selectedItem.toString(), editMac)
-
-        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateMacFieldVisibility(parent?.getItemAtPosition(position).toString(), editMac)
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        val dialog = AlertDialog.Builder(this)
-            .setView(dialogView)
-            .setCancelable(true)
-            .create()
-
-        btnSavePairing.setOnClickListener {
-            val name = editName.text.toString()
-            if (name.isBlank()) {
-                Toast.makeText(this, "Please enter a name", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            lifecycleScope.launch {
-                val networks = withContext(Dispatchers.IO) { db.networkDao().getAllNetworks() }
-                if (networks.isEmpty()) {
-                    Toast.makeText(this@MainActivity, "Please create a network first.", Toast.LENGTH_LONG).show()
-                } else {
-                    pairingViewModel.savePairedDevice(
-                        ip = ip,
-                        mac = if (editMac.visibility == View.VISIBLE) mac else null,
-                        customName = name,
-                        user = editSshUser.text.toString().ifBlank { null },
-                        pass = editSshPassword.text.toString().ifBlank { null },
-                        networkId = networks.first().id
-                    )
-                    dialog.dismiss()
-                }
-            }
-        }
-        dialog.show()
-    }
-
-    private fun updateMacFieldVisibility(type: String, editMac: EditText) {
-        if (type == "PC" || type == "LAPTOP") {
-            editMac.visibility = View.VISIBLE
-        } else {
-            editMac.visibility = View.GONE
-        }
-    }
-
-    private fun setupGuideButtons() {
-        findViewById<Button>(R.id.btnCopyWindowsScript).setOnClickListener {
-            val script = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\\\f.bat\""
-            copyToClipboard(script, "Windows command copied")
-        }
-
-        findViewById<Button>(R.id.btnCopyLinuxScript).setOnClickListener {
-            val cmd = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_linux.sh | sudo bash"
-            copyToClipboard(cmd, "Linux command copied")
-        }
-
-        findViewById<Button>(R.id.btnCopyMacScript).setOnClickListener {
-            val cmd = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_mac.sh | zsh"
-            copyToClipboard(cmd, "macOS command copied")
         }
     }
 
@@ -261,14 +241,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val clip = android.content.ClipData.newPlainText("Fluxio Setup", text)
         cm.setPrimaryClip(clip)
         Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
-    }
-
-    private suspend fun initLookupTables() {
-        val types = DeviceType.entries.map { it.name }
-        types.forEach { db.networkDao().insertType(DeviceTypeEntity(typeName = it)) }
-        
-        val statuses = listOf("Active", "Inactive", "Online", "Offline")
-        statuses.forEach { db.networkDao().insertStatus(DeviceStatusEntity(statusLabel = it)) }
     }
 
     private fun checkConnectivity() {
@@ -281,18 +253,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    private fun handlePowerControl(device: SavedDevice) {
+    private fun handlePowerControl(device: SupabaseDevice) {
         lifecycleScope.launch {
-            val deviceView = withContext(Dispatchers.IO) { db.networkDao().getDeviceViewByDeviceId(device.id) }
-            val statusLabel = deviceView?.statusEntity?.statusLabel ?: "Inactive"
+            val statusLabel = device.status ?: "Offline"
 
-            if (statusLabel == "Active" || statusLabel == "Online") {
-                if (device.sshUsername.isNullOrBlank() || device.sshPassword.isNullOrBlank()) {
-                    Toast.makeText(this@MainActivity, "Please set SSH credentials in Device Settings to shutdown.", Toast.LENGTH_LONG).show()
+            if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
+                if (device.macAddress.isNullOrBlank()) {
+                    Toast.makeText(this@MainActivity, "Missing MAC address!", Toast.LENGTH_LONG).show()
                 } else {
-                    Toast.makeText(this@MainActivity, "Sending Shutdown command via SSH...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Sending Shutdown command via Supabase...", Toast.LENGTH_SHORT).show()
                     withContext(Dispatchers.IO) {
-                        WakeOnLan.shutdownSsh(device.ip, device.sshUsername, device.sshPassword)
+                        supabaseRepository.sendCommand(device.macAddress!!, "shutdown")
                     }
                 }
             } else {
@@ -327,24 +298,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
         when (item.itemId) {
-            R.id.nav_current -> {
-                layoutCurrent.visibility = View.VISIBLE
-                layoutSaved.visibility = View.GONE
-                layoutSetup.visibility = View.GONE
-                supportActionBar?.title = getString(R.string.title_current)
-            }
-            R.id.nav_saved -> {
-                layoutCurrent.visibility = View.GONE
-                layoutSaved.visibility = View.VISIBLE
-                layoutSetup.visibility = View.GONE
-                supportActionBar?.title = getString(R.string.title_saved)
-                loadSavedNetworks()
-            }
-            R.id.nav_setup -> {
-                layoutCurrent.visibility = View.GONE
-                layoutSaved.visibility = View.GONE
-                layoutSetup.visibility = View.VISIBLE
-                supportActionBar?.title = getString(R.string.setup_guide)
+            R.id.nav_current -> showCurrentNetwork()
+            R.id.nav_saved -> showSavedNetworks()
+            R.id.nav_setup -> showSetupGuide()
+            R.id.nav_logout -> {
+                lifecycleScope.launch {
+                    authRepository.signOut()
+                    startActivity(Intent(this@MainActivity, LoginActivity::class.java))
+                    finish()
+                }
             }
         }
         drawerLayout.closeDrawer(GravityCompat.START)
@@ -366,14 +328,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .setPositiveButton(getString(R.string.save)) { _, _ ->
                 val name = input.text.toString()
                 if (name.isNotEmpty()) {
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        val existing = db.networkDao().getNetworkByName(name)
-                        if (existing == null) {
-                            saveNetworkToDb(name)
-                        } else {
-                            withContext(Dispatchers.Main) {
+                    lifecycleScope.launch {
+                        try {
+                            val networks = supabaseRepository.getNetworks()
+                            if (networks.any { it.name.equals(name, ignoreCase = true) }) {
                                 Toast.makeText(this@MainActivity, "Name already exists!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                saveNetworkToSupabase(name)
                             }
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "Error checking networks", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -382,63 +346,69 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .show()
     }
 
-    private suspend fun saveNetworkToDb(name: String) {
-        val network = SavedNetwork(name = name)
-        val netId = db.networkDao().insertNetwork(network)
+    private suspend fun saveNetworkToSupabase(name: String) {
+        try {
+            val network = supabaseRepository.createNetwork(name)
+            val networkId = network.id ?: return
 
-        currentScanResults.forEach { view ->
-            val typeId = db.networkDao().getTypeIdByName(view.typeEntity?.typeName ?: "OTHER")
-            val statusId = db.networkDao().getStatusIdByName(view.statusEntity?.statusLabel ?: "Inactive")
-            
-            val device = view.device.copy(
-                networkId = netId,
-                typeId = typeId,
-                statusId = statusId
-            )
-            db.networkDao().upsertDevice(device)
-        }
+            val devicesToSave = currentScanResults.map { it.copy(networkId = networkId) }
+            supabaseRepository.saveDevices(devicesToSave)
 
-        withContext(Dispatchers.Main) {
-            Toast.makeText(this@MainActivity, getString(R.string.saved), Toast.LENGTH_SHORT).show()
-            btnSave.isEnabled = false
-        }
-    }
-
-    private fun loadSavedNetworks() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val networks = db.networkDao().getAllNetworks()
             withContext(Dispatchers.Main) {
-                if (networks.isEmpty()) {
-                    findViewById<TextView>(R.id.txtNoSaved).visibility = View.VISIBLE
-                    recyclerSaved.visibility = View.GONE
-                } else {
-                    findViewById<TextView>(R.id.txtNoSaved).visibility = View.GONE
-                    recyclerSaved.visibility = View.VISIBLE
-                    recyclerSaved.adapter = SavedNetworkAdapter(networks,
-                        onClick = { network -> showNetworkDetails(network) },
-                        onLongClick = { network -> showDeleteNetworkDialog(network) }
-                    )
-                }
+                Toast.makeText(this@MainActivity, getString(R.string.saved), Toast.LENGTH_SHORT).show()
+                btnSave.isEnabled = false
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@MainActivity, "Error saving to Supabase", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun showDeleteNetworkDialog(network: SavedNetwork) {
+    private fun loadSavedNetworks() {
+        lifecycleScope.launch {
+            try {
+                val networks = supabaseRepository.getNetworks()
+                withContext(Dispatchers.Main) {
+                    if (networks.isEmpty()) {
+                        findViewById<TextView>(R.id.txtNoSaved).visibility = View.VISIBLE
+                        recyclerSaved.visibility = View.GONE
+                    } else {
+                        findViewById<TextView>(R.id.txtNoSaved).visibility = View.GONE
+                        recyclerSaved.visibility = View.VISIBLE
+                        recyclerSaved.adapter = SavedNetworkAdapter(networks,
+                            onClick = { network -> showNetworkDetails(network) },
+                            onLongClick = { network -> showDeleteNetworkDialog(network) }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error loading networks", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showDeleteNetworkDialog(network: SupabaseNetwork) {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.delete_network))
             .setMessage(getString(R.string.confirm_delete_network, network.name))
             .setPositiveButton(getString(R.string.delete)) { _, _ ->
-                lifecycleScope.launch(Dispatchers.IO) {
-                    db.networkDao().deleteNetwork(network)
-                    withContext(Dispatchers.Main) { loadSavedNetworks() }
+                lifecycleScope.launch {
+                    try {
+                        network.id?.let { supabaseRepository.deleteNetwork(it) }
+                        loadSavedNetworks()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "Error deleting network", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }
 
-    private fun showNetworkDetails(network: SavedNetwork) {
+    private fun showNetworkDetails(network: SupabaseNetwork) {
         activeDetailsDialog?.dismiss()
+        currentViewingNetwork = network
 
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_list, null)
         val recyclerView = dialogView.findViewById<RecyclerView>(R.id.recyclerDeviceList)
@@ -454,6 +424,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         activeDetailsDialog?.setOnDismissListener {
             activeDetailsDialog = null
+            currentViewingNetwork = null
             loadSavedNetworks()
         }
 
@@ -461,50 +432,54 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             performRescanForNetwork(network, btnRescan)
         }
 
+        refreshNetworkDetails(network)
+        activeDetailsDialog?.show()
+    }
+
+    private fun refreshNetworkDetails(network: SupabaseNetwork) {
+        val recyclerView = activeDetailsDialog?.findViewById<RecyclerView>(R.id.recyclerDeviceList) ?: return
         lifecycleScope.launch {
-            db.networkDao().getDevicesWithDetails(network.id).collect { detailList ->
+            try {
+                val devices = supabaseRepository.getDevicesForNetwork(network.id!!)
                 withContext(Dispatchers.Main) {
-                    val adapter = DeviceAdapter(detailList.toMutableList(), { device ->
+                    val adapter = DeviceAdapter(devices.toMutableList(), { device ->
                         showEditDeviceDialog(device) {
-                            // Flow auto-updates
+                            refreshNetworkDetails(network)
                         }
                     }, { device -> handlePowerControl(device) })
                     recyclerView.adapter = adapter
                 }
                 
-                checkStatusAndSave(detailList)
+                checkStatusAndSave(devices)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Error loading devices", Toast.LENGTH_SHORT).show()
             }
         }
-        
-        activeDetailsDialog?.show()
     }
 
-    private suspend fun checkStatusAndSave(detailList: List<DeviceView>) {
+    private suspend fun checkStatusAndSave(detailList: List<SupabaseDevice>) {
         withContext(Dispatchers.IO) {
-            val activeStatusId = db.networkDao().getStatusIdByName("Active")
-            val inactiveStatusId = db.networkDao().getStatusIdByName("Inactive")
-            
-            detailList.forEach { view ->
-                val isActive = repository.isHostReachable(view.device.ip, 500)
-                val newStatusId = if (isActive) activeStatusId else inactiveStatusId
+            detailList.forEach { device ->
+                val isActive = repository.isHostReachable(device.ipAddress, 500)
+                val newStatus = if (isActive) "Online" else "Offline"
                 
-                // Update MAC address if missing
-                var updatedDevice = view.device
+                var updatedDevice = device
                 if (updatedDevice.macAddress.isNullOrBlank() && isActive) {
-                    val mac = repository.getMacAddress(updatedDevice.ip)
+                    val mac = repository.getMacAddress(updatedDevice.ipAddress)
                     if (mac != null) {
                         updatedDevice = updatedDevice.copy(macAddress = mac)
                     }
                 }
 
-                if (updatedDevice.statusId != newStatusId || updatedDevice.macAddress != view.device.macAddress) {
-                    db.networkDao().updateDevice(updatedDevice.copy(statusId = newStatusId))
+                if (updatedDevice.status != newStatus || updatedDevice.macAddress != device.macAddress) {
+                    val finalDevice = updatedDevice.copy(status = newStatus)
+                    supabaseRepository.upsertDevice(finalDevice)
                 }
             }
         }
     }
 
-    private fun performRescanForNetwork(network: SavedNetwork, btn: Button) {
+    private fun performRescanForNetwork(network: SupabaseNetwork, btn: Button) {
         btn.isEnabled = false
         btn.text = getString(R.string.scanning)
 
@@ -518,31 +493,26 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
 
             val subnetPrefix = myIp.substringBeforeLast(".")
-            
             val scanResults = repository.scanSubnet(subnetPrefix)
 
-            withContext(Dispatchers.IO) {
+            try {
+                val existingDevices = supabaseRepository.getDevicesForNetwork(network.id!!)
                 scanResults.forEach { found ->
-                    val existing = db.networkDao().getDeviceByOriginalName(network.id, found.device.originalName)
+                    val existing = existingDevices.find { it.macAddress == found.macAddress }
                     if (existing != null) {
-                        db.networkDao().upsertDevice(existing.copy(
-                            ip = found.device.ip,
-                            macAddress = found.device.macAddress ?: existing.macAddress ?: repository.getMacAddress(found.device.ip),
-                            statusId = db.networkDao().getStatusIdByName("Active")
-                        ))
+                        val updated = existing.copy(
+                            ipAddress = found.ipAddress,
+                            status = "Online"
+                        )
+                        supabaseRepository.upsertDevice(updated)
                     } else {
-                        val typeId = db.networkDao().getTypeIdByName(repository.identifyDeviceType(found.device.name, found.device.ip).name)
-                        val statusId = db.networkDao().getStatusIdByName("Active")
-                        db.networkDao().upsertDevice(found.device.copy(
-                            networkId = network.id,
-                            typeId = typeId,
-                            statusId = statusId
-                        ))
+                        val newDevice = found.copy(networkId = network.id!!, status = "Online")
+                        supabaseRepository.upsertDevice(newDevice)
                     }
                 }
-                
-                val count = db.networkDao().getDevicesForNetwork(network.id).size
-                db.networkDao().updateNetwork(network.copy(deviceCount = count, timestamp = System.currentTimeMillis()))
+                refreshNetworkDetails(network)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Rescan failed", Toast.LENGTH_SHORT).show()
             }
 
             btn.isEnabled = true
@@ -550,64 +520,47 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    private fun showEditDeviceDialog(device: SavedDevice, onComplete: () -> Unit) {
+    private fun showEditDeviceDialog(device: SupabaseDevice, onComplete: () -> Unit) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
         val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
-        val editSshUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
-        val editSshPassword = dialogView.findViewById<EditText>(R.id.editSshPassword)
+        
         val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
         val txtTitle = dialogView.findViewById<TextView>(R.id.txtEditTitle)
 
         txtTitle?.text = "Edit Device"
         editName.setText(device.name)
         editIp.apply {
-            setText(device.ip)
+            setText(device.ipAddress)
             isEnabled = false
         }
         editMac.setText(device.macAddress ?: "")
-        editSshUser.setText(device.sshUsername ?: "")
-        editSshPassword.setText(device.sshPassword ?: "")
 
-        val typeList = DeviceType.entries.map { it.name }
+        val typeList = DeviceType.values().map { it.name }
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
         
-        lifecycleScope.launch {
-            val viewData = withContext(Dispatchers.IO) { db.networkDao().getDeviceViewByDeviceId(device.id) }
-            val typeName = viewData?.typeEntity?.typeName ?: "OTHER"
-            spinner.setSelection(typeList.indexOf(typeName.uppercase()))
-            
-            // Set initial visibility
-            updateMacFieldVisibility(typeName.uppercase(), editMac)
-        }
-
-        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateMacFieldVisibility(parent?.getItemAtPosition(position).toString(), editMac)
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
+        val typeName = device.type ?: "OTHER"
+        spinner.setSelection(typeList.indexOf(typeName.uppercase()))
 
         val dialog = AlertDialog.Builder(this).setView(dialogView).create()
 
         dialogView.findViewById<Button>(R.id.btnSaveChanges).setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
-                val typeId = db.networkDao().getTypeIdByName(spinner.selectedItem.toString())
+            lifecycleScope.launch {
                 val updated = device.copy(
                     name = editName.text.toString(),
-                    typeId = typeId,
-                    macAddress = if (editMac.visibility == View.VISIBLE) editMac.text.toString().trim().uppercase().ifBlank { null } else device.macAddress,
-                    sshUsername = editSshUser.text.toString().trim().ifBlank { null },
-                    sshPassword = editSshPassword.text.toString().ifBlank { null }
+                    type = spinner.selectedItem.toString(),
+                    macAddress = editMac.text.toString().trim().uppercase().ifBlank { null }
                 )
-                db.networkDao().updateDevice(updated)
-                withContext(Dispatchers.Main) {
+                try {
+                    supabaseRepository.updateDevice(updated)
                     Toast.makeText(this@MainActivity, getString(R.string.updated), Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                     onComplete()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Update failed", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -617,16 +570,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 .setTitle(getString(R.string.delete_device))
                 .setMessage(getString(R.string.confirm_delete_device))
                 .setPositiveButton(getString(R.string.yes)) { _, _ ->
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        db.networkDao().deleteDevice(device)
-                        val remainingDevices = db.networkDao().getDevicesForNetwork(device.networkId)
-                        db.networkDao().getNetworkById(device.networkId)?.let { network ->
-                            db.networkDao().updateNetwork(network.copy(deviceCount = remainingDevices.size))
-                        }
-                        withContext(Dispatchers.Main) {
+                    lifecycleScope.launch {
+                        try {
+                            device.macAddress?.let { supabaseRepository.deleteDevice(it) }
                             Toast.makeText(this@MainActivity, getString(R.string.deleted), Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                             onComplete()
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "Delete failed", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -636,41 +587,35 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         dialog.show()
     }
 
-    private fun showDeviceInfoDialog(device: SavedDevice) {
+    private fun showDeviceInfoDialog(device: SupabaseDevice) {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_info, null)
         val txtMac = dialogView.findViewById<TextView>(R.id.txtDeviceMacDialog)
         
-        lifecycleScope.launch {
-            val viewData = withContext(Dispatchers.IO) { db.networkDao().getDeviceViewByDeviceId(device.id) }
+        dialogView.apply {
+            findViewById<TextView>(R.id.txtDeviceNameDialog).text = device.name
+            findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ipAddress
+            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type ?: "OTHER"
+            findViewById<TextView>(R.id.txtDeviceStatusDialog).text = device.status ?: "Offline"
             
-            withContext(Dispatchers.Main) {
-                dialogView.apply {
-                    findViewById<TextView>(R.id.txtDeviceNameDialog).text = viewData?.device?.name ?: device.name
-                    findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ip
-                    findViewById<TextView>(R.id.txtDeviceTypeDialog).text = viewData?.typeEntity?.typeName ?: "OTHER"
-                    findViewById<TextView>(R.id.txtDeviceStatusDialog).text = viewData?.statusEntity?.statusLabel ?: "Inactive"
-                    
-                    val typeName = viewData?.typeEntity?.typeName?.uppercase() ?: "OTHER"
-                    if (typeName == "PC" || typeName == "LAPTOP") {
-                        txtMac.visibility = View.VISIBLE
-                        txtMac.text = "MAC: ${device.macAddress ?: "Unknown"}"
-                    } else {
-                        txtMac.visibility = View.GONE
-                    }
-
-                    val iconRes = when (typeName) {
-                        "TV" -> R.drawable.tv
-                        "PHONE", "SMARTPHONE" -> R.drawable.phone
-                        "PC", "LAPTOP" -> R.drawable.computer
-                        "PRINTER" -> R.drawable.printer
-                        "ROUTER" -> R.drawable.router
-                        else -> R.drawable.fluxio
-                    }
-                    findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
-                }
-                AlertDialog.Builder(this@MainActivity).setView(dialogView).setPositiveButton(getString(R.string.ok), null).show()
+            val typeName = device.type?.uppercase() ?: "OTHER"
+            if (typeName == "PC" || typeName == "LAPTOP") {
+                txtMac.visibility = View.VISIBLE
+                txtMac.text = "MAC: ${device.macAddress ?: "Unknown"}"
+            } else {
+                txtMac.visibility = View.GONE
             }
+
+            val iconRes = when (typeName) {
+                "TV" -> R.drawable.tv
+                "PHONE", "SMARTPHONE" -> R.drawable.phone
+                "PC", "LAPTOP" -> R.drawable.computer
+                "PRINTER" -> R.drawable.printer
+                "ROUTER" -> R.drawable.router
+                else -> R.drawable.fluxio
+            }
+            findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
         }
+        AlertDialog.Builder(this@MainActivity).setView(dialogView).setPositiveButton(getString(R.string.ok), null).show()
     }
 
     private fun checkWifiConnection() {
@@ -689,31 +634,18 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 return@launch
             }
 
-            // Show visual loading indicator
             progressContainer.visibility = View.VISIBLE
             btnScan.isEnabled = false
 
             val subnetPrefix = myIp.substringBeforeLast(".")
             
-            // Perform scan on background thread
             val scanResults = withContext(Dispatchers.IO) {
                 repository.scanSubnet(subnetPrefix)
             }
             
-            // Enrich results with MAC addresses from existing table if missing in current scan
-            val enrichedResults = scanResults.map { view ->
-                if (view.device.macAddress.isNullOrBlank()) {
-                    val savedMac = db.networkDao().getMacForDevice(view.device.originalName, view.device.ip)
-                    if (savedMac != null) {
-                        view.copy(device = view.device.copy(macAddress = savedMac))
-                    } else view
-                } else view
-            }
-
-            // Update UI
             currentScanResults.clear()
-            currentScanResults.addAll(enrichedResults)
-            currentDeviceAdapter.updateList(currentScanResults)
+            currentScanResults.addAll(scanResults)
+            currentDeviceAdapter.updateList(ArrayList(currentScanResults))
             
             progressContainer.visibility = View.GONE
             btnScan.isEnabled = true

@@ -9,9 +9,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class SavedNetworkAdapter(
-    private val networks: List<SavedNetwork>,
-    private val onClick: (SavedNetwork) -> Unit,
-    private val onLongClick: (SavedNetwork) -> Unit
+    private var networks: List<SupabaseNetwork>,
+    private val onClick: (SupabaseNetwork) -> Unit,
+    private val onLongClick: (SupabaseNetwork) -> Unit
 ) : RecyclerView.Adapter<SavedNetworkAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -28,8 +28,9 @@ class SavedNetworkAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val network = networks[position]
         holder.nameTextView.text = network.name
-        val sdf = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
-        val dateString = sdf.format(Date(network.timestamp))
+        
+        // Supabase createdAt is usually ISO8601 string
+        val dateString = network.createdAt?.take(16)?.replace("T", " ") ?: "Neznano"
         holder.detailsTextView.text = "$dateString | ${network.deviceCount} naprav"
 
         holder.itemView.setOnClickListener { onClick(network) }
@@ -37,6 +38,11 @@ class SavedNetworkAdapter(
             onLongClick(network)
             true
         }
+    }
+
+    fun updateList(newList: List<SupabaseNetwork>) {
+        networks = newList
+        notifyDataSetChanged()
     }
 
     override fun getItemCount() = networks.size
