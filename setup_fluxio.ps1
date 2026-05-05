@@ -33,6 +33,7 @@ $MAC = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress
 $Body = @{ 
     mac_address = $MAC; 
     status = "Online";
+    device_type = "Computer";
     last_seen = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 } | ConvertTo-Json
 

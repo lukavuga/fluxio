@@ -34,6 +34,7 @@ curl -s -X PATCH "$URL?ip_address=eq.$IP" \
 -d "{
   \"mac_address\": \"$MAC\",
   \"status\": \"Online\",
+  \"device_type\": \"Computer\",
   \"last_seen\": \"$TIMESTAMP\"
 }"
 

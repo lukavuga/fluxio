@@ -15,20 +15,13 @@ class ScanViewModel(
 
     /**
      * Requirement: Save discovered devices to Supabase.
-     * macAddress is sent as null initially.
      */
-    fun registerDiscoveredDevices(networkUuid: String, discoveredDevices: List<DeviceView>) {
+    fun registerDiscoveredDevices(networkUuid: String, discoveredDevices: List<SupabaseDevice>) {
         viewModelScope.launch {
             _uiState.value = ScanUiState.Saving
             try {
-                val devicesToSave = discoveredDevices.map { view ->
-                    SupabaseDevice(
-                        networkId = networkUuid,
-                        name = view.device.name,
-                        ipAddress = view.device.ip,
-                        macAddress = null, // Initial requirement: null
-                        status = "Offline"
-                    )
+                val devicesToSave = discoveredDevices.map { device ->
+                    device.copy(networkId = networkUuid)
                 }
 
                 // Batch insert using Supabase Postgrest

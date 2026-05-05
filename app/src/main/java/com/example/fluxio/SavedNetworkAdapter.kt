@@ -29,9 +29,9 @@ class SavedNetworkAdapter(
         val network = networks[position]
         holder.nameTextView.text = network.name
         
-        // Supabase createdAt is usually ISO8601 string
-        val dateString = network.createdAt?.take(16)?.replace("T", " ") ?: "Neznano"
-        holder.detailsTextView.text = "$dateString | ${network.deviceCount} naprav"
+        // Supabase timestamp is usually ISO8601 string
+        val dateString = network.timestamp?.take(16)?.replace("T", " ") ?: "Unknown date"
+        holder.detailsTextView.text = "$dateString | ${network.deviceCount} devices"
 
         holder.itemView.setOnClickListener { onClick(network) }
         holder.itemView.setOnLongClickListener {

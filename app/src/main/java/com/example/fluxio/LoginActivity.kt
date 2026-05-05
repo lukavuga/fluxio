@@ -12,22 +12,16 @@ import kotlinx.coroutines.launch
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
-    private lateinit var authRepository: AuthRepository
+    private val authRepository = AuthRepository(SupabaseInstance.client)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val supabaseRepository = SupabaseRepository(
-            supabaseUrl = "https://vbpmfulxbpcuboirjokv.supabase.co",
-            supabaseKey = "sb_publishable_RtG4GlKSSxRk3fCLYfXwjA_a-d50Yvp"
-        )
-        authRepository = AuthRepository(supabaseRepository.client)
-
         binding.btnLogin.setOnClickListener {
-            val email = binding.editEmail.text.toString()
-            val password = binding.editPassword.text.toString()
+            val email = binding.emailInput.text.toString().trim()
+            val password = binding.passwordInput.text.toString()
 
             if (email.isNotEmpty() && password.isNotEmpty()) {
                 login(email, password)

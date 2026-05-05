@@ -12,6 +12,9 @@ import java.net.Socket
 
 class NetworkRepository {
 
+    private val printerPorts = intArrayOf(9100, 631, 515)
+    private val computerPorts = intArrayOf(135, 445, 22)
+
     /**
      * Reads the ARP table at /proc/net/arp to find the MAC address for a given IP.
      */
@@ -38,50 +41,63 @@ class NetworkRepository {
         return null
     }
 
+    private fun checkPort(host: String, port: Int, timeout: Int): Boolean {
+        return try {
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(host, port), timeout)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun isHostReachable(host: String, timeout: Int): Boolean {
         return try {
             val addr = InetAddress.getByName(host)
             if (addr.isReachable(timeout)) return true
             
             val commonPorts = intArrayOf(135, 445, 80, 22, 443, 8080)
-            commonPorts.any { port ->
-                try {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(host, port), timeout / 2)
-                        true
-                    }
-                } catch (_: Exception) { false }
-            }
+            commonPorts.any { port -> checkPort(host, port, timeout / 2) }
         } catch (_: Exception) { false }
     }
 
     /**
-     * Scans the subnet for active devices.
+     * Scans the subnet for active devices, filtering for Computers and Printers.
      */
     suspend fun scanSubnet(subnetPrefix: String, timeoutMs: Int = 1000): List<SupabaseDevice> = withContext(Dispatchers.IO) {
         (1..254).map { i ->
             async {
                 val host = "$subnetPrefix.$i"
                 try {
+                    // First check if the host is even alive
                     if (isHostReachable(host, timeoutMs)) {
-                        val mac = getMacAddress(host)
                         
-                        val rawName = try {
-                            val addr = InetAddress.getByName(host)
-                            if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
-                        } catch (_: Exception) { "unknown" }
-                        
-                        val formattedName = formatDeviceName(rawName, host)
-                        val type = identifyDeviceType(formattedName, host)
-                        
-                        SupabaseDevice(
-                            networkId = "", // Assigned when saving
-                            ipAddress = host,
-                            name = formattedName,
-                            macAddress = mac,
-                            status = "Online",
-                            type = type.name
-                        )
+                        // Check for Computer ports
+                        val isComputer = computerPorts.any { checkPort(host, it, 200) }
+                        // Check for Printer ports
+                        val isPrinter = if (!isComputer) printerPorts.any { checkPort(host, it, 200) } else false
+
+                        if (isComputer || isPrinter) {
+                            val mac = getMacAddress(host)
+                            val rawName = try {
+                                val addr = InetAddress.getByName(host)
+                                if (addr.canonicalHostName != host) addr.canonicalHostName else "unknown"
+                            } catch (_: Exception) { "unknown" }
+
+                            val formattedName = formatDeviceName(rawName, host)
+                            val deviceCategory = if (isComputer) "Computer" else "Printer"
+
+                            SupabaseDevice(
+                                networkId = "", // Assigned when saving
+                                ipAddress = host,
+                                name = formattedName,
+                                macAddress = mac,
+                                status = "Online",
+                                deviceType = deviceCategory,
+                                type = if (isComputer) DeviceType.PC.name else DeviceType.PRINTER.name
+                            )
+                        } else null
                     } else null
                 } catch (e: Exception) {
                     null
@@ -97,18 +113,5 @@ class NetworkRepository {
         return hostname.lowercase()
             .removeSuffix(".local").removeSuffix(".home").removeSuffix(".lan")
             .replaceFirstChar { it.uppercase() }
-    }
-
-    fun identifyDeviceType(hostname: String, ip: String): DeviceType {
-        val h = hostname.lowercase()
-        val mobileKeywords = listOf("samsung", "galaxy", "iphone", "apple", "pixel", "google", "xiaomi", "redmi", "vivo", "oppo", "huawei", "honor", "motorola", "phone", "mobile", "android", "watch", "wearable")
-        return when {
-            h.contains("tv") || h.contains("chromecast") || h.contains("roku") -> DeviceType.TV
-            mobileKeywords.any { h.contains(it) } -> DeviceType.PHONE
-            h.contains("print") || h.contains("hp") || h.contains("epson") -> DeviceType.PRINTER
-            h.contains("desktop") || h.contains("pc") || h.contains("workstation") || h.contains("laptop") || h.contains("macbook") -> DeviceType.PC
-            h.contains("router") || h.contains("gateway") || ip.endsWith(".1") -> DeviceType.ROUTER
-            else -> DeviceType.OTHER
-        }
     }
 }

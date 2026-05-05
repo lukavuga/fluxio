@@ -1,28 +1,28 @@
 package com.example.fluxio
 
-import io.github.jan.supabase.createSupabaseClient
-import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.from
-import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.PostgresAction
-import io.github.jan.supabase.realtime.postgresChangeFlow
-import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.channel
-import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.realtime.decodeRecord
+import io.github.jan.supabase.realtime.postgresChangeFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 data class SupabaseNetwork(
     @SerialName("id")
     val id: String? = null,
+    @SerialName("user_id")
+    val userId: String? = null,
     @SerialName("name")
     val name: String,
-    @SerialName("created_at")
-    val createdAt: String? = null,
-    @SerialName("device_count")
+    @SerialName("timestamp")
+    val timestamp: String? = null,
+    @Transient
     val deviceCount: Int = 0
 )
 
@@ -34,38 +34,65 @@ data class SupabaseDevice(
     val networkId: String,
     @SerialName("name")
     val name: String,
+    @SerialName("original_name")
+    val originalName: String? = null,
     @SerialName("ip_address")
     val ipAddress: String,
     @SerialName("mac_address")
     val macAddress: String? = null,
     @SerialName("status")
-    val status: String? = "Offline",
-    @SerialName("pending_command")
-    val pendingCommand: String? = null,
+    val status: String = "Offline",
     @SerialName("last_seen")
     val lastSeen: String? = null,
-    @SerialName("type")
-    val type: String? = "OTHER"
+    @SerialName("pending_command")
+    val pendingCommand: String? = null,
+    @SerialName("ssh_username")
+    val sshUsername: String? = null,
+    @SerialName("ssh_password")
+    val sshPassword: String? = null,
+    @SerialName("device_type")
+    val deviceType: String? = null,
+
+    @Transient
+    var type: String? = "OTHER"
 )
 
-class SupabaseRepository(
-    supabaseUrl: String,
-    supabaseKey: String
-) {
-    val client = createSupabaseClient(supabaseUrl, supabaseKey) {
-        install(Postgrest)
-        install(Realtime)
-        install(Auth)
-    }
+class SupabaseRepository {
+    private val client = SupabaseInstance.client
 
     suspend fun getNetworks(): List<SupabaseNetwork> {
-        return client.from("networks").select().decodeList<SupabaseNetwork>()
+        val userId = client.auth.currentUserOrNull()?.id ?: return emptyList()
+        return client.from("networks").select {
+            filter {
+                eq("user_id", userId)
+            }
+        }.decodeList<SupabaseNetwork>()
     }
 
-    suspend fun createNetwork(name: String): SupabaseNetwork {
-        return client.from("networks").insert(SupabaseNetwork(name = name)) {
+    suspend fun createNetwork(name: String, userId: String): SupabaseNetwork {
+        return client.from("networks").insert(SupabaseNetwork(name = name, userId = userId)) {
             select()
         }.decodeSingle<SupabaseNetwork>()
+    }
+
+    suspend fun getDevices(networkId: String): List<SupabaseDevice> {
+        return client.from("devices").select {
+            filter {
+                eq("network_id", networkId)
+            }
+        }.decodeList<SupabaseDevice>()
+    }
+
+    suspend fun upsertDevice(device: SupabaseDevice) {
+        client.from("devices").upsert(device)
+    }
+
+    suspend fun updatePendingCommand(deviceId: String, command: String?) {
+        client.from("devices").update(mapOf("pending_command" to command)) {
+            filter {
+                eq("id", deviceId)
+            }
+        }
     }
 
     suspend fun deleteNetwork(networkId: String) {
@@ -76,50 +103,22 @@ class SupabaseRepository(
         }
     }
 
-    suspend fun getDevicesForNetwork(networkId: String): List<SupabaseDevice> {
-        return client.from("devices").select {
+    suspend fun deleteDevice(deviceId: String) {
+        client.from("devices").delete {
             filter {
-                eq("network_id", networkId)
+                eq("id", deviceId)
             }
-        }.decodeList<SupabaseDevice>()
+        }
     }
 
     suspend fun saveDevices(devices: List<SupabaseDevice>) {
-        if (devices.isEmpty()) return
-        client.from("devices").upsert(devices, onConflict = "mac_address")
-    }
-
-    suspend fun upsertDevice(device: SupabaseDevice) {
-        client.from("devices").upsert(device, onConflict = "mac_address")
-    }
-
-    suspend fun updateDevice(device: SupabaseDevice) {
-        client.from("devices").update(device) {
-            filter {
-                if (device.id != null) eq("id", device.id)
-                else if (device.macAddress != null) eq("mac_address", device.macAddress)
-            }
-        }
-    }
-
-    suspend fun deleteDevice(macAddress: String) {
-        client.from("devices").delete {
-            filter {
-                eq("mac_address", macAddress)
-            }
-        }
-    }
-
-    suspend fun sendCommand(macAddress: String, command: String) {
-        client.from("devices").update(mapOf("pending_command" to command)) {
-            filter {
-                eq("mac_address", macAddress)
-            }
+        if (devices.isNotEmpty()) {
+            client.from("devices").upsert(devices)
         }
     }
 
     fun observeDeviceChanges(): Flow<SupabaseDevice> {
-        val channel = client.channel("device_updates")
+        val channel = client.channel("public:devices")
         return channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
             table = "devices"
         }.mapNotNull { action ->

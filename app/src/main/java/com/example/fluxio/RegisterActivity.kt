@@ -1,6 +1,5 @@
 package com.example.fluxio
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
@@ -12,28 +11,31 @@ import kotlinx.coroutines.launch
 class RegisterActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRegisterBinding
-    private lateinit var authRepository: AuthRepository
+    private val authRepository = AuthRepository(SupabaseInstance.client)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val supabaseRepository = SupabaseRepository(
-            supabaseUrl = "https://vbpmfulxbpcuboirjokv.supabase.co",
-            supabaseKey = "sb_publishable_RtG4GlKSSxRk3fCLYfXwjA_a-d50Yvp"
-        )
-        authRepository = AuthRepository(supabaseRepository.client)
-
         binding.btnRegister.setOnClickListener {
-            val email = binding.editEmail.text.toString()
-            val password = binding.editPassword.text.toString()
+            val email = binding.emailInput.text.toString().trim()
+            val password = binding.passwordInput.text.toString()
+            val confirmPassword = binding.confirmPasswordInput.text.toString()
 
-            if (email.isNotEmpty() && password.isNotEmpty()) {
-                register(email, password)
-            } else {
+            if (email.isEmpty() || password.isEmpty()) {
                 Toast.makeText(this, "Please fill in all fields", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+
+            if (password != confirmPassword) {
+                binding.confirmPasswordLayout.error = "Passwords do not match!"
+                return@setOnClickListener
+            } else {
+                binding.confirmPasswordLayout.error = null
+            }
+
+            register(email, password)
         }
 
         binding.txtLogin.setOnClickListener {
@@ -46,13 +48,15 @@ class RegisterActivity : AppCompatActivity() {
         binding.btnRegister.isEnabled = false
 
         lifecycleScope.launch {
-            try {
-                authRepository.signUp(email, password)
+            val result = authRepository.signUp(email, password)
+            
+            if (result.isSuccess) {
                 Toast.makeText(this@RegisterActivity, "Registration successful! Please check your email for verification.", Toast.LENGTH_LONG).show()
                 finish()
-            } catch (e: Exception) {
-                Toast.makeText(this@RegisterActivity, "Registration failed: ${e.message}", Toast.LENGTH_LONG).show()
-            } finally {
+            } else {
+                val exception = result.exceptionOrNull()
+                Toast.makeText(this@RegisterActivity, "Registration failed: ${exception?.message}", Toast.LENGTH_LONG).show()
+
                 binding.progressBar.visibility = View.GONE
                 binding.btnRegister.isEnabled = true
             }

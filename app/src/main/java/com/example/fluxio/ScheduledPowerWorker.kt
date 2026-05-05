@@ -7,27 +7,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class ScheduledPowerWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    private val supabaseRepository = SupabaseRepository()
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val deviceId = inputData.getLong("DEVICE_ID", -1)
+        val deviceId = inputData.getString("DEVICE_ID")
         val action = inputData.getString("ACTION") ?: "TOGGLE"
 
-        if (deviceId == -1L) return@withContext Result.failure()
-
-        val db = AppDatabase.getDatabase(applicationContext)
-        val deviceView = db.networkDao().getDeviceViewByDeviceId(deviceId) ?: return@withContext Result.failure()
+        if (deviceId == null) return@withContext Result.failure()
 
         try {
-            val typeName = deviceView.typeEntity?.typeName?.uppercase() ?: "OTHER"
+            val networkId = inputData.getString("NETWORK_ID") ?: return@withContext Result.failure()
+            val devices = supabaseRepository.getDevices(networkId)
+            val device = devices.find { it.id == deviceId } ?: return@withContext Result.failure()
+
+            val typeName = device.type?.uppercase() ?: "OTHER"
             when (typeName) {
                 "PC", "LAPTOP" -> {
                     if (action == "ON") {
-                        WakeOnLan.sendMagicPacket(deviceView.device.macAddress)
+                        device.macAddress?.let { WakeOnLan.sendMagicPacket(it) }
                     } else {
-                        // Remote shutdown logic placeholder
+                        supabaseRepository.updatePendingCommand(deviceId, "shutdown")
                     }
                 }
                 else -> {
-                    // Generic action for TV, PRINTER, SMARTPHONE, etc.
+                    // Generic action
                 }
             }
             Result.success()

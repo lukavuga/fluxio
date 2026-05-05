@@ -1,15 +1,20 @@
 package com.example.fluxio
 
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.gotrue.auth
+import io.github.jan.supabase.gotrue.providers.builtin.Email
 
 class AuthRepository(private val supabaseClient: SupabaseClient) {
 
-    suspend fun signUp(email: String, password: String) {
-        supabaseClient.auth.signUpWith(Email) {
-            this.email = email
-            this.password = password
+    suspend fun signUp(email: String, password: String): Result<Unit> {
+        return try {
+            supabaseClient.auth.signUpWith(Email) {
+                this.email = email
+                this.password = password
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -21,7 +26,6 @@ class AuthRepository(private val supabaseClient: SupabaseClient) {
     }
 
     fun isUserLoggedIn(): Boolean {
-        // Checks if there is an existing session
         return supabaseClient.auth.currentSessionOrNull() != null
     }
 

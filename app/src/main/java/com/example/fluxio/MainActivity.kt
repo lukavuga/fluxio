@@ -26,6 +26,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
+import io.github.jan.supabase.gotrue.auth
 import kotlinx.coroutines.*
 import java.net.*
 import java.util.*
@@ -45,8 +46,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var navView: NavigationView
 
     private lateinit var repository: NetworkRepository
-    private lateinit var supabaseRepository: SupabaseRepository
-    private lateinit var authRepository: AuthRepository
+    private val supabaseRepository = SupabaseRepository()
+    private val authRepository = AuthRepository(SupabaseInstance.client)
     
     private val currentScanResults = mutableListOf<SupabaseDevice>()
     private lateinit var currentDeviceAdapter: DeviceAdapter
@@ -57,12 +58,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        supabaseRepository = SupabaseRepository(
-            supabaseUrl = "https://vbpmfulxbpcuboirjokv.supabase.co",
-            supabaseKey = "sb_publishable_RtG4GlKSSxRk3fCLYfXwjA_a-d50Yvp"
-        )
-        authRepository = AuthRepository(supabaseRepository.client)
-
         // Session Management: Check if user is logged in
         if (!authRepository.isUserLoggedIn()) {
             startActivity(Intent(this, LoginActivity::class.java))
@@ -110,7 +105,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         navView.setNavigationItemSelectedListener(this)
         
-        // Display user email in drawer header if needed
+        // Display user email in drawer header
         val headerView = navView.getHeaderView(0)
         headerView.findViewById<TextView>(R.id.textViewUserEmail)?.text = authRepository.currentUserEmail()
 
@@ -258,12 +253,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val statusLabel = device.status ?: "Offline"
 
             if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
-                if (device.macAddress.isNullOrBlank()) {
-                    Toast.makeText(this@MainActivity, "Missing MAC address!", Toast.LENGTH_LONG).show()
+                if (device.id.isNullOrBlank()) {
+                    Toast.makeText(this@MainActivity, "Missing Device ID!", Toast.LENGTH_LONG).show()
                 } else {
                     Toast.makeText(this@MainActivity, "Sending Shutdown command via Supabase...", Toast.LENGTH_SHORT).show()
                     withContext(Dispatchers.IO) {
-                        supabaseRepository.sendCommand(device.macAddress!!, "shutdown")
+                        supabaseRepository.updatePendingCommand(device.id!!, "shutdown")
                     }
                 }
             } else {
@@ -348,7 +343,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private suspend fun saveNetworkToSupabase(name: String) {
         try {
-            val network = supabaseRepository.createNetwork(name)
+            val userId = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: return
+            val network = supabaseRepository.createNetwork(name, userId)
             val networkId = network.id ?: return
 
             val devicesToSave = currentScanResults.map { it.copy(networkId = networkId) }
@@ -360,7 +356,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Error saving to Supabase", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Error saving to Supabase: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -440,7 +436,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val recyclerView = activeDetailsDialog?.findViewById<RecyclerView>(R.id.recyclerDeviceList) ?: return
         lifecycleScope.launch {
             try {
-                val devices = supabaseRepository.getDevicesForNetwork(network.id!!)
+                val devices = supabaseRepository.getDevices(network.id!!)
                 withContext(Dispatchers.Main) {
                     val adapter = DeviceAdapter(devices.toMutableList(), { device ->
                         showEditDeviceDialog(device) {
@@ -496,7 +492,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val scanResults = repository.scanSubnet(subnetPrefix)
 
             try {
-                val existingDevices = supabaseRepository.getDevicesForNetwork(network.id!!)
+                val existingDevices = supabaseRepository.getDevices(network.id!!)
                 scanResults.forEach { found ->
                     val existing = existingDevices.find { it.macAddress == found.macAddress }
                     if (existing != null) {
@@ -537,7 +533,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
         editMac.setText(device.macAddress ?: "")
 
-        val typeList = DeviceType.values().map { it.name }
+        val typeList = DeviceType.entries.map { it.name }
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
@@ -555,7 +551,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     macAddress = editMac.text.toString().trim().uppercase().ifBlank { null }
                 )
                 try {
-                    supabaseRepository.updateDevice(updated)
+                    supabaseRepository.upsertDevice(updated)
                     Toast.makeText(this@MainActivity, getString(R.string.updated), Toast.LENGTH_SHORT).show()
                     dialog.dismiss()
                     onComplete()
@@ -572,7 +568,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 .setPositiveButton(getString(R.string.yes)) { _, _ ->
                     lifecycleScope.launch {
                         try {
-                            device.macAddress?.let { supabaseRepository.deleteDevice(it) }
+                            device.id?.let { supabaseRepository.deleteDevice(it) }
                             Toast.makeText(this@MainActivity, getString(R.string.deleted), Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                             onComplete()
