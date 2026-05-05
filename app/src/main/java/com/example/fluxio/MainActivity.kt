@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.util.Log
 import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -24,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
 import io.github.jan.supabase.gotrue.auth
@@ -44,6 +46,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var recyclerCurrent: RecyclerView
     private lateinit var recyclerSaved: RecyclerView
     private lateinit var navView: NavigationView
+    private lateinit var swipeRefreshMain: SwipeRefreshLayout
 
     private lateinit var repository: NetworkRepository
     private val supabaseRepository = SupabaseRepository()
@@ -77,6 +80,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         layoutSaved = findViewById(R.id.layoutSavedNetworks)
         layoutSetup = findViewById(R.id.layoutSetupGuide)
         progressContainer = findViewById(R.id.progressContainer)
+        swipeRefreshMain = findViewById(R.id.swipeRefreshMain)
 
         btnScan = findViewById(R.id.btnScan)
         btnSave = findViewById(R.id.btnSave)
@@ -125,9 +129,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         })
 
         btnScan.setOnClickListener {
-            currentScanResults.clear()
-            currentDeviceAdapter.updateList(emptyList())
-            btnSave.isEnabled = false
+            startSmartScan()
+        }
+
+        swipeRefreshMain.setOnRefreshListener {
             startSmartScan()
         }
 
@@ -224,7 +229,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 // If viewing a specific network, refresh its devices
                 if (currentViewingNetwork?.id == supabaseDevice.networkId) {
                     withContext(Dispatchers.Main) {
-                        refreshNetworkDetails(currentViewingNetwork!!)
+                        val recyclerView = activeDetailsDialog?.findViewById<RecyclerView>(R.id.recyclerDeviceList)
+                        if (recyclerView != null) {
+                            refreshNetworkDetails(currentViewingNetwork!!, recyclerView)
+                        }
                     }
                 }
             }
@@ -245,6 +253,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val isConnected = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         if (!isConnected) {
             Snackbar.make(findViewById(android.R.id.content), "No internet connection", Snackbar.LENGTH_LONG).show()
+        }
+    }
+
+    private fun checkWifiConnection() {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(activeNetwork)
+        val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        if (!isWifi) {
+            Snackbar.make(findViewById(android.R.id.content), getString(R.string.no_wifi), Snackbar.LENGTH_LONG).show()
         }
     }
 
@@ -283,12 +301,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 }
             }
         }
-        recyclerCurrent.setOnTouchListener(swipeListener)
-        recyclerSaved.setOnTouchListener(swipeListener)
+        // Applying only to containers, NOT the RefreshLayout itself to avoid conflicts
         layoutCurrent.setOnTouchListener(swipeListener)
         layoutSaved.setOnTouchListener(swipeListener)
         layoutSetup.setOnTouchListener(swipeListener)
-        findViewById<View>(R.id.txtNoSaved).setOnTouchListener(swipeListener)
     }
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
@@ -310,7 +326,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showSaveDialog() {
         if (currentScanResults.isEmpty()) {
-            Toast.makeText(this, "No devices to save!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No devices to scan first!", Toast.LENGTH_SHORT).show()
             return
         }
         val input = EditText(this).apply {
@@ -347,16 +363,21 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             val network = supabaseRepository.createNetwork(name, userId)
             val networkId = network.id ?: return
 
-            val devicesToSave = currentScanResults.map { it.copy(networkId = networkId) }
+            // FIXED: Ensure we don't send originalName which is now Transient to avoid SQL errors
+            val devicesToSave = currentScanResults.map { 
+                it.copy(networkId = networkId, originalName = null) 
+            }
             supabaseRepository.saveDevices(devicesToSave)
 
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, getString(R.string.saved), Toast.LENGTH_SHORT).show()
                 btnSave.isEnabled = false
+                currentScanResults.clear()
             }
         } catch (e: Exception) {
+            Log.e("FluxioSave", "Save failed: ${e.message}")
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Error saving to Supabase: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Error saving: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -408,9 +429,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_device_list, null)
         val recyclerView = dialogView.findViewById<RecyclerView>(R.id.recyclerDeviceList)
-        val btnRescan = dialogView.findViewById<Button>(R.id.btnRescanNetwork)
+        val swipeRefresh = dialogView.findViewById<SwipeRefreshLayout>(R.id.swipeRefreshDevices)
 
         recyclerView.layoutManager = GridLayoutManager(this, 2)
+        val detailAdapter = DeviceAdapter(mutableListOf(), { device ->
+            showEditDeviceDialog(device) {
+                refreshNetworkDetails(network, recyclerView)
+            }
+        }, { device -> handlePowerControl(device) })
+        recyclerView.adapter = detailAdapter
 
         activeDetailsDialog = AlertDialog.Builder(this)
             .setTitle("${getString(R.string.devices)}: ${network.name}")
@@ -424,28 +451,22 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             loadSavedNetworks()
         }
 
-        btnRescan.setOnClickListener {
-            performRescanForNetwork(network, btnRescan)
+        swipeRefresh.setOnRefreshListener {
+            performRealTimeRescan(network, detailAdapter, swipeRefresh)
         }
 
-        refreshNetworkDetails(network)
+        refreshNetworkDetails(network, recyclerView)
         activeDetailsDialog?.show()
     }
 
-    private fun refreshNetworkDetails(network: SupabaseNetwork) {
-        val recyclerView = activeDetailsDialog?.findViewById<RecyclerView>(R.id.recyclerDeviceList) ?: return
+    private fun refreshNetworkDetails(network: SupabaseNetwork, recyclerView: RecyclerView) {
         lifecycleScope.launch {
             try {
                 val devices = supabaseRepository.getDevices(network.id!!)
                 withContext(Dispatchers.Main) {
-                    val adapter = DeviceAdapter(devices.toMutableList(), { device ->
-                        showEditDeviceDialog(device) {
-                            refreshNetworkDetails(network)
-                        }
-                    }, { device -> handlePowerControl(device) })
-                    recyclerView.adapter = adapter
+                    val adapter = recyclerView.adapter as? DeviceAdapter
+                    adapter?.updateList(devices)
                 }
-                
                 checkStatusAndSave(devices)
             } catch (e: Exception) {
                 Toast.makeText(this@MainActivity, "Error loading devices", Toast.LENGTH_SHORT).show()
@@ -475,45 +496,115 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
     }
 
-    private fun performRescanForNetwork(network: SupabaseNetwork, btn: Button) {
-        btn.isEnabled = false
-        btn.text = getString(R.string.scanning)
-
+    private fun performRealTimeRescan(network: SupabaseNetwork, adapter: DeviceAdapter, swipeRefresh: SwipeRefreshLayout) {
         lifecycleScope.launch {
             val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() }
             if (myIp == null) {
                 Toast.makeText(this@MainActivity, getString(R.string.no_wifi), Toast.LENGTH_SHORT).show()
-                btn.isEnabled = true
-                btn.text = getString(R.string.search_new_devices)
+                swipeRefresh.isRefreshing = false
                 return@launch
             }
 
             val subnetPrefix = myIp.substringBeforeLast(".")
-            val scanResults = repository.scanSubnet(subnetPrefix)
-
-            try {
-                val existingDevices = supabaseRepository.getDevices(network.id!!)
-                scanResults.forEach { found ->
-                    val existing = existingDevices.find { it.macAddress == found.macAddress }
-                    if (existing != null) {
-                        val updated = existing.copy(
-                            ipAddress = found.ipAddress,
-                            status = "Online"
-                        )
-                        supabaseRepository.upsertDevice(updated)
+            
+            repository.discoverDevices(subnetPrefix).collect { device ->
+                val deviceToSave = device.copy(networkId = network.id!!)
+                
+                withContext(Dispatchers.Main) {
+                    val currentList = adapter.getCurrentList().toMutableList()
+                    val existingIndex = currentList.indexOfFirst { it.ipAddress == deviceToSave.ipAddress }
+                    if (existingIndex != -1) {
+                        currentList[existingIndex] = deviceToSave
                     } else {
-                        val newDevice = found.copy(networkId = network.id!!, status = "Online")
-                        supabaseRepository.upsertDevice(newDevice)
+                        currentList.add(deviceToSave)
                     }
+                    adapter.updateList(currentList)
                 }
-                refreshNetworkDetails(network)
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Rescan failed", Toast.LENGTH_SHORT).show()
+                supabaseRepository.upsertDevice(deviceToSave)
             }
 
-            btn.isEnabled = true
-            btn.text = getString(R.string.search_new_devices)
+            swipeRefresh.isRefreshing = false
         }
+    }
+
+    private fun startSmartScan() {
+        lifecycleScope.launch {
+            val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() } ?: run {
+                Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
+                swipeRefreshMain.isRefreshing = false
+                return@launch
+            }
+
+            progressContainer.visibility = View.VISIBLE
+            btnScan.isEnabled = false
+            btnSave.isEnabled = false
+
+            val subnetPrefix = myIp.substringBeforeLast(".")
+            currentScanResults.clear()
+            currentDeviceAdapter.updateList(emptyList())
+            
+            repository.discoverDevices(subnetPrefix).collect { device ->
+                currentScanResults.add(device)
+                withContext(Dispatchers.Main) {
+                    currentDeviceAdapter.updateList(ArrayList(currentScanResults))
+                }
+            }
+            
+            progressContainer.visibility = View.GONE
+            swipeRefreshMain.isRefreshing = false
+            btnScan.isEnabled = true
+            btnSave.isEnabled = currentScanResults.isNotEmpty()
+
+            Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun getLocalIpAddress(): String? {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val link = cm.getLinkProperties(cm.activeNetwork)
+        return link?.linkAddresses?.firstOrNull {
+            it.address is Inet4Address && !it.address.isLoopbackAddress
+        }?.address?.hostAddress
+    }
+
+    private fun DeviceAdapter.getCurrentList(): List<SupabaseDevice> {
+        return try {
+            val field = this.javaClass.getDeclaredField("devices")
+            field.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            field.get(this) as List<SupabaseDevice>
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    open class OnSwipeTouchListener(context: Context) : View.OnTouchListener {
+        private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            private val SWIPE_THRESHOLD = 100
+            private val SWIPE_VELOCITY_THRESHOLD = 100
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (e1 == null) return false
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (abs(dx) > abs(dy) && abs(dx) > SWIPE_THRESHOLD && abs(vx) > SWIPE_VELOCITY_THRESHOLD) {
+                    if (dx > 0) onSwipeRight() else onSwipeLeft()
+                    return true
+                }
+                return false
+            }
+        })
+        @SuppressLint("ClickableViewAccessibility")
+        override fun onTouch(v: View, event: MotionEvent): Boolean {
+            return try {
+                val handled = gestureDetector.onTouchEvent(event)
+                if (!handled && event.action == MotionEvent.ACTION_UP) v.performClick()
+                handled
+            } catch (e: Exception) {
+                false
+            }
+        }
+        open fun onSwipeRight() {}
+        open fun onSwipeLeft() {}
     }
 
     private fun showEditDeviceDialog(device: SupabaseDevice, onComplete: () -> Unit) {
@@ -538,8 +629,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
         
-        val typeName = device.type ?: "OTHER"
-        spinner.setSelection(typeList.indexOf(typeName.uppercase()))
+        val typeName = (device.type ?: device.deviceType) ?: "OTHER"
+        spinner.setSelection(typeList.indexOf(typeName.uppercase()).coerceAtLeast(0))
 
         val dialog = AlertDialog.Builder(this).setView(dialogView).create()
 
@@ -548,6 +639,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 val updated = device.copy(
                     name = editName.text.toString(),
                     type = spinner.selectedItem.toString(),
+                    deviceType = spinner.selectedItem.toString(),
                     macAddress = editMac.text.toString().trim().uppercase().ifBlank { null }
                 )
                 try {
@@ -590,10 +682,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         dialogView.apply {
             findViewById<TextView>(R.id.txtDeviceNameDialog).text = device.name
             findViewById<TextView>(R.id.txtDeviceIpDialog).text = device.ipAddress
-            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = device.type ?: "OTHER"
+            findViewById<TextView>(R.id.txtDeviceTypeDialog).text = (device.type ?: device.deviceType) ?: "OTHER"
             findViewById<TextView>(R.id.txtDeviceStatusDialog).text = device.status ?: "Offline"
             
-            val typeName = device.type?.uppercase() ?: "OTHER"
+            val typeName = (device.type ?: device.deviceType)?.uppercase() ?: "OTHER"
             if (typeName == "PC" || typeName == "LAPTOP") {
                 txtMac.visibility = View.VISIBLE
                 txtMac.text = "MAC: ${device.macAddress ?: "Unknown"}"
@@ -612,75 +704,5 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             findViewById<ImageView>(R.id.imgDeviceIconDialog).setImageResource(iconRes)
         }
         AlertDialog.Builder(this@MainActivity).setView(dialogView).setPositiveButton(getString(R.string.ok), null).show()
-    }
-
-    private fun checkWifiConnection() {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = cm.activeNetwork ?: return
-        val caps = cm.getNetworkCapabilities(network)
-        if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            Toast.makeText(this, getString(R.string.no_wifi), Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun startSmartScan() {
-        lifecycleScope.launch {
-            val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() } ?: run {
-                Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-
-            progressContainer.visibility = View.VISIBLE
-            btnScan.isEnabled = false
-
-            val subnetPrefix = myIp.substringBeforeLast(".")
-            
-            val scanResults = withContext(Dispatchers.IO) {
-                repository.scanSubnet(subnetPrefix)
-            }
-            
-            currentScanResults.clear()
-            currentScanResults.addAll(scanResults)
-            currentDeviceAdapter.updateList(ArrayList(currentScanResults))
-            
-            progressContainer.visibility = View.GONE
-            btnScan.isEnabled = true
-            btnSave.isEnabled = currentScanResults.isNotEmpty()
-
-            Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun getLocalIpAddress(): String? {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val link = cm.getLinkProperties(cm.activeNetwork)
-        return link?.linkAddresses?.firstOrNull {
-            it.address is Inet4Address && !it.address.isLoopbackAddress
-        }?.address?.hostAddress
-    }
-
-    open class OnSwipeTouchListener(context: Context) : View.OnTouchListener {
-        private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
-            private val SWIPE_THRESHOLD = 100
-            private val SWIPE_VELOCITY_THRESHOLD = 100
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-                if (e1 == null) return false
-                val dx = e2.x - e1.x
-                val dy = e2.y - e1.y
-                if (abs(dx) > abs(dy) && abs(dx) > SWIPE_THRESHOLD && abs(vx) > SWIPE_VELOCITY_THRESHOLD) {
-                    if (dx > 0) onSwipeRight() else onSwipeLeft()
-                    return true
-                }
-                return false
-            }
-        })
-        @SuppressLint("ClickableViewAccessibility")
-        override fun onTouch(v: View, event: MotionEvent): Boolean {
-            val handled = gestureDetector.onTouchEvent(event)
-            if (!handled && event.action == MotionEvent.ACTION_UP) v.performClick()
-            return handled
-        }
-        open fun onSwipeRight() {}
-        open fun onSwipeLeft() {}
     }
 }

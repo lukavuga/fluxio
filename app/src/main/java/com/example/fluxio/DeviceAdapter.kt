@@ -52,7 +52,7 @@ class DeviceAdapter(
             onItemClick: (SupabaseDevice) -> Unit,
             onPowerControlClick: (SupabaseDevice) -> Unit
         ) {
-            val typeName = device.type?.uppercase() ?: "OTHER"
+            val typeName = (device.type ?: device.deviceType)?.uppercase() ?: "OTHER"
             val statusLabel = device.status ?: "Offline"
 
             deviceName.text = device.name
@@ -103,7 +103,13 @@ class DeviceAdapter(
         override fun getOldListSize() = oldList.size
         override fun getNewListSize() = newList.size
         override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-            return oldList[oldItemPosition].macAddress == newList[newItemPosition].macAddress
+            val old = oldList[oldItemPosition]
+            val new = newList[newItemPosition]
+            return if (old.macAddress != null && new.macAddress != null) {
+                old.macAddress == new.macAddress
+            } else {
+                old.ipAddress == new.ipAddress
+            }
         }
         override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
             val old = oldList[oldItemPosition]
@@ -111,7 +117,7 @@ class DeviceAdapter(
             return old.ipAddress == new.ipAddress && 
                    old.macAddress == new.macAddress &&
                    old.status == new.status &&
-                   old.type == new.type &&
+                   (old.type ?: old.deviceType) == (new.type ?: new.deviceType) &&
                    old.name == new.name
         }
     }

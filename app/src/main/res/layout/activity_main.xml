@@ -70,10 +70,16 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent">
 
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/recyclerCurrent"
+                    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                        android:id="@+id/swipeRefreshMain"
                         android:layout_width="match_parent"
-                        android:layout_height="match_parent" />
+                        android:layout_height="match_parent">
+
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/recyclerCurrent"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent" />
+                    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
                     <LinearLayout
                         android:id="@+id/progressContainer"
@@ -301,7 +307,7 @@
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="Deploy the agent script on your PC to link it with the cloud database."
+                                android:text="Deploy the agent script on your PC to link it with the cloud database. Service and device monitor should start automatically."
                                 android:textColor="@color/text_secondary"
                                 android:layout_marginBottom="16dp" />
 

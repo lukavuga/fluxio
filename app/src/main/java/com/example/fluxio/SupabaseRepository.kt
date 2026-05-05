@@ -34,8 +34,6 @@ data class SupabaseDevice(
     val networkId: String,
     @SerialName("name")
     val name: String,
-    @SerialName("original_name")
-    val originalName: String? = null,
     @SerialName("ip_address")
     val ipAddress: String,
     @SerialName("mac_address")
@@ -54,7 +52,9 @@ data class SupabaseDevice(
     val deviceType: String? = null,
 
     @Transient
-    var type: String? = "OTHER"
+    var type: String? = "OTHER",
+    @Transient
+    var originalName: String? = null
 )
 
 class SupabaseRepository {

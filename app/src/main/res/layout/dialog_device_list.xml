@@ -5,19 +5,28 @@
     android:orientation="vertical"
     android:padding="10dp">
 
-    <Button
-        android:id="@+id/btnRescanNetwork"
+    <TextView
+        android:id="@+id/txtRescanHint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Išči nove naprave"
-        android:backgroundTint="#2196F3"
-        android:textColor="#FFFFFF"
-        android:layout_marginBottom="10dp"/>
+        android:text="SWIPE UP to rescan the network for any new devices"
+        android:textAlignment="center"
+        android:textColor="#B0B0B0"
+        android:textSize="12sp"
+        android:layout_marginBottom="8dp"/>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerDeviceList"
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefreshDevices"
         android:layout_width="match_parent"
-        android:layout_height="400dp"
-        android:padding="5dp"
-        android:clipToPadding="false"/>
+        android:layout_height="450dp">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerDeviceList"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="4dp"
+            android:clipToPadding="false"/>
+
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
 </LinearLayout>
