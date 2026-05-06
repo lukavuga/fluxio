@@ -39,6 +39,24 @@ class DeviceAdapter(
         diffResult.dispatchUpdatesTo(this)
     }
 
+    fun getDeviceByIp(ip: String): SupabaseDevice? {
+        return devices.find { it.ipAddress == ip }
+    }
+
+    /**
+     * Requirement: Streaming UI updates.
+     */
+    fun addOrUpdateDevice(device: SupabaseDevice) {
+        val index = devices.indexOfFirst { it.ipAddress == device.ipAddress }
+        if (index != -1) {
+            devices[index] = device
+            notifyItemChanged(index)
+        } else {
+            devices.add(device)
+            notifyItemInserted(devices.size - 1)
+        }
+    }
+
     class DeviceViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val deviceIcon: ImageView = itemView.findViewById(R.id.imgDeviceIcon)
         private val deviceName: TextView = itemView.findViewById(R.id.txtDeviceName)
@@ -52,44 +70,42 @@ class DeviceAdapter(
             onItemClick: (SupabaseDevice) -> Unit,
             onPowerControlClick: (SupabaseDevice) -> Unit
         ) {
-            val typeName = (device.type ?: device.deviceType)?.uppercase() ?: "OTHER"
+            val typeName = (device.deviceType ?: device.type)?.uppercase() ?: "PC"
             val statusLabel = device.status ?: "Offline"
 
             deviceName.text = device.name
             deviceIp.text = device.ipAddress
             
-            deviceMac.text = if (!device.macAddress.isNullOrBlank()) "MAC: ${device.macAddress}" else "MAC: Unknown"
+            val formattedMac = device.macAddress?.uppercase() ?: "Unknown"
+            deviceMac.text = "MAC: $formattedMac"
+            
             deviceStatus.text = statusLabel
 
             if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
-                deviceStatus.setTextColor("#00E676".toColorInt()) // Neon Green
+                deviceStatus.setTextColor("#00E676".toColorInt())
+                deviceStatus.text = "Online"
             } else {
-                deviceStatus.setTextColor("#FF1744".toColorInt()) // Neon Red
+                deviceStatus.setTextColor("#FF1744".toColorInt())
+                deviceStatus.text = "Offline"
             }
 
             val iconRes = when (typeName) {
-                "TV" -> R.drawable.tv
-                "SMARTPHONE", "PHONE" -> R.drawable.phone
                 "PRINTER" -> R.drawable.printer
-                "PC", "LAPTOP" -> R.drawable.computer
                 "ROUTER" -> R.drawable.router
-                else -> R.drawable.fluxio
+                else -> R.drawable.computer // PC default
             }
             deviceIcon.setImageResource(iconRes)
-            deviceIcon.clearColorFilter()
 
-            if (typeName == "PC" || typeName == "LAPTOP") {
+            if (typeName == "PC") {
                 btnPowerControl.visibility = View.VISIBLE
-                deviceMac.visibility = View.VISIBLE
                 if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
-                    btnPowerControl.text = itemView.context.getString(R.string.shutdown)
+                    btnPowerControl.text = "TURN OFF"
                 } else {
-                    btnPowerControl.text = itemView.context.getString(R.string.power_on)
+                    btnPowerControl.text = "TURN ON"
                 }
                 btnPowerControl.setOnClickListener { onPowerControlClick(device) }
             } else {
-                btnPowerControl.visibility = View.GONE
-                deviceMac.visibility = View.GONE
+                btnPowerControl.visibility = View.INVISIBLE
             }
 
             itemView.setOnClickListener { onItemClick(device) }
@@ -105,20 +121,12 @@ class DeviceAdapter(
         override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
             val old = oldList[oldItemPosition]
             val new = newList[newItemPosition]
-            return if (old.macAddress != null && new.macAddress != null) {
-                old.macAddress == new.macAddress
-            } else {
-                old.ipAddress == new.ipAddress
-            }
+            return old.ipAddress == new.ipAddress
         }
         override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
             val old = oldList[oldItemPosition]
             val new = newList[newItemPosition]
-            return old.ipAddress == new.ipAddress && 
-                   old.macAddress == new.macAddress &&
-                   old.status == new.status &&
-                   (old.type ?: old.deviceType) == (new.type ?: new.deviceType) &&
-                   old.name == new.name
+            return old == new
         }
     }
 }

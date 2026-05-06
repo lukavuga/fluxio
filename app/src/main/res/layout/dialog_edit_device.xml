@@ -9,34 +9,33 @@
         android:orientation="vertical"
         android:padding="24dp">
 
-        <TextView
-            android:id="@+id/txtEditTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Edit Device"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="16dp"/>
+        <!-- Removed txtEditTitle to avoid duplicate with AlertDialog title -->
 
         <EditText
             android:id="@+id/editDeviceName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Device Name" />
+            android:hint="Device Name"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"/>
 
         <EditText
             android:id="@+id/editDeviceIp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="IP Address" />
+            android:hint="IP Address"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"/>
 
         <EditText
             android:id="@+id/editDeviceMac"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="MAC Address (e.g. AA:BB:CC:DD:EE:FF)" />
+            android:hint="MAC Address (e.g. AA:BB:CC:DD:EE:FF)"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"/>
 
         <Spinner
             android:id="@+id/spinnerDeviceType"
@@ -49,6 +48,7 @@
             android:layout_height="wrap_content"
             android:text="SSH Credentials (for Power Off)"
             android:textStyle="bold"
+            android:textColor="@color/text_primary"
             android:layout_marginTop="24dp"
             android:layout_marginBottom="8dp"/>
 
@@ -57,7 +57,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="SSH Username"
-            android:inputType="text"/>
+            android:inputType="text"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"/>
 
         <EditText
             android:id="@+id/editSshPassword"
@@ -65,13 +67,16 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:hint="SSH Password"
-            android:inputType="textPassword"/>
+            android:inputType="textPassword"
+            android:textColorHint="@color/text_secondary"
+            android:textColor="@color/text_primary"/>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
             <Button
                 android:id="@+id/btnDeleteDevice"
@@ -80,14 +85,28 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Delete"
-                android:textColor="@android:color/holo_red_light" />
+                android:textColor="@color/flux_neon_red" />
+
+            <Button
+                android:id="@+id/btnCloseDialog"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:backgroundTint="#333333"
+                android:text="Close"
+                android:textColor="@color/white"
+                android:textStyle="bold" />
 
             <Button
                 android:id="@+id/btnSaveChanges"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Save" />
+                android:layout_weight="1.2"
+                android:backgroundTint="@color/flux_neon_blue"
+                android:text="Save"
+                android:textColor="@color/black"
+                android:textStyle="bold" />
 
         </LinearLayout>
     </LinearLayout>

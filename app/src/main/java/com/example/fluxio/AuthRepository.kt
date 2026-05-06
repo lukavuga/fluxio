@@ -3,6 +3,7 @@ package com.example.fluxio
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.gotrue.providers.builtin.Email
+import io.github.jan.supabase.gotrue.user.UserInfo
 
 class AuthRepository(private val supabaseClient: SupabaseClient) {
 
@@ -35,5 +36,9 @@ class AuthRepository(private val supabaseClient: SupabaseClient) {
     
     fun currentUserEmail(): String? {
         return supabaseClient.auth.currentUserOrNull()?.email
+    }
+
+    fun getCurrentUser(): UserInfo? {
+        return supabaseClient.auth.currentUserOrNull()
     }
 }

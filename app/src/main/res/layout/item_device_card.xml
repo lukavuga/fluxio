@@ -2,7 +2,7 @@
 <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="220dp"
     android:layout_margin="8dp"
     app:cardBackgroundColor="@color/flux_card"
     app:cardCornerRadius="12dp"
@@ -10,15 +10,15 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="16dp"
+        android:padding="12dp"
         android:gravity="center">
 
         <ImageView
             android:id="@+id/imgDeviceIcon"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
+            android:layout_width="45dp"
+            android:layout_height="45dp"
             android:src="@drawable/computer"
             android:background="@drawable/rounded_bg_transparent"
             android:padding="8dp"/>
@@ -30,8 +30,10 @@
             android:text="Device Name"
             android:textColor="@color/text_primary"
             android:textStyle="bold"
-            android:textSize="16sp"
-            android:layout_marginTop="12dp"
+            android:textSize="14sp"
+            android:layout_marginTop="8dp"
+            android:maxLines="1"
+            android:ellipsize="end"
             android:gravity="center"/>
 
         <TextView
@@ -40,8 +42,8 @@
             android:layout_height="wrap_content"
             android:text="192.168.1.1"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:layout_marginTop="4dp"/>
+            android:textSize="11sp"
+            android:layout_marginTop="2dp"/>
 
         <TextView
             android:id="@+id/txtDeviceMac"
@@ -50,31 +52,37 @@
             android:text="MAC: Unknown"
             android:textColor="@color/text_secondary"
             android:textSize="10sp"
-            android:layout_marginTop="2dp"/>
+            android:layout_marginTop="1dp"/>
 
         <TextView
             android:id="@+id/txtDeviceStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Inactive"
+            android:text="Offline"
             android:textColor="@color/flux_neon_red"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:background="@drawable/rounded_bg_transparent"
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"/>
 
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
         <Button
             android:id="@+id/btnPowerControl"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:layout_marginTop="8dp"
             android:text="POWER ON"
-            android:textSize="10sp"
-            android:visibility="gone"
+            android:textSize="9sp"
+            android:padding="0dp"
+            android:visibility="invisible"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"/>
     </LinearLayout>
 </androidx.cardview.widget.CardView>

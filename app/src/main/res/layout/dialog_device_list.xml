@@ -15,6 +15,15 @@
         android:textSize="12sp"
         android:layout_marginBottom="8dp"/>
 
+    <Button
+        android:id="@+id/btnAddDeviceManual"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="+ Add Device Manually"
+        android:textColor="@color/flux_neon_blue"
+        android:layout_marginBottom="8dp"/>
+
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefreshDevices"
         android:layout_width="match_parent"
