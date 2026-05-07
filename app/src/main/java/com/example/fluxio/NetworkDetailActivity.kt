@@ -1,5 +1,6 @@
 package com.example.fluxio
 
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -16,6 +17,8 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,7 +47,7 @@ class NetworkDetailActivity : AppCompatActivity() {
         networkName = intent.getStringExtra("NETWORK_NAME") ?: "Network Details"
 
         if (networkId.isEmpty()) {
-            Toast.makeText(this, "Critical Error: Network ID missing", Toast.LENGTH_LONG).show()
+            showFeedback("Critical Error: Network ID missing")
             finish()
             return
         }
@@ -102,11 +105,11 @@ class NetworkDetailActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         supabaseRepository.deleteNetwork(networkId)
-                        Toast.makeText(this@NetworkDetailActivity, "Network deleted", Toast.LENGTH_SHORT).show()
+                        showFeedback("Network deleted")
                         finish()
                     } catch (e: Exception) {
                         Log.e("Fluxio", "Delete network failed", e)
-                        Toast.makeText(this@NetworkDetailActivity, "Deletion failed", Toast.LENGTH_SHORT).show()
+                        showFeedback("Deletion failed")
                     }
                 }
             }
@@ -124,9 +127,9 @@ class NetworkDetailActivity : AppCompatActivity() {
                 }
                 checkStatusInBackground(devices)
             } catch (e: Exception) {
-                Log.e("Fluxio", "Error loading devices: ${e.stackTraceToString()}")
+                Log.e("Fluxio", "Error loading devices", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@NetworkDetailActivity, "Error loading devices", Toast.LENGTH_SHORT).show()
+                    showFeedback("Error loading devices")
                 }
             }
         }
@@ -145,7 +148,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("Fluxio", "Real-time observation error: ${e.stackTraceToString()}")
+                Log.e("Fluxio", "Real-time observation error", e)
             }
         }
     }
@@ -169,7 +172,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                         supabaseRepository.upsertDevice(updated)
                     }
                 } catch (e: Exception) {
-                    Log.e("Fluxio", "Status check error for ${device.ipAddress}: ${e.stackTraceToString()}")
+                    Log.e("Fluxio", "Status check error for ${device.ipAddress}", e)
                 }
             }
         }
@@ -181,7 +184,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                 val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() }
                 if (myIp == null) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@NetworkDetailActivity, "No Wi-Fi connection", Toast.LENGTH_SHORT).show()
+                        showFeedback("No Wi-Fi connection")
                         swipeRefresh.isRefreshing = false
                     }
                     return@launch
@@ -216,20 +219,20 @@ class NetworkDetailActivity : AppCompatActivity() {
                         
                         supabaseRepository.upsertDevice(deviceToUpsert)
                     } catch (e: Exception) {
-                        Log.e("Fluxio", "Error processing discovered device: ${e.stackTraceToString()}")
+                        Log.e("Fluxio", "Error processing discovered device", e)
                     }
                 }
                 
                 withContext(Dispatchers.Main) {
                     swipeRefresh.isRefreshing = false
                     val message = if (newDevicesCount > 0) "$newDevicesCount new devices added" else "Scan complete."
-                    Snackbar.make(findViewById(android.R.id.content), message, Snackbar.LENGTH_LONG).show()
+                    showFeedback(message)
                 }
             } catch (e: Exception) {
-                Log.e("Fluxio", "Scan crash prevented: ${e.stackTraceToString()}")
+                Log.e("Fluxio", "Scan crash prevented", e)
                 withContext(Dispatchers.Main) {
                     swipeRefresh.isRefreshing = false
-                    Toast.makeText(this@NetworkDetailActivity, "Scan failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showFeedback("Scan failed: ${e.message}")
                 }
             }
         }
@@ -242,82 +245,121 @@ class NetworkDetailActivity : AppCompatActivity() {
                 if (typeName != "PC") return@launch
 
                 if (device.status.lowercase() == "online" || device.status.lowercase() == "active") {
-                    device.id?.let {
-                        supabaseRepository.updatePendingCommand(it, "shutdown")
-                        Toast.makeText(this@NetworkDetailActivity, "Shutdown command sent", Toast.LENGTH_SHORT).show()
+                    if (device.credentialId.isNullOrBlank()) {
+                        showFeedback("No SSH profile linked! Edit device to link one.")
+                    } else {
+                        showFeedback("Sending Shutdown command...")
+                        val cred = supabaseRepository.getCredentialById(device.credentialId)
+                        if (cred != null) {
+                            val decryptedPass = SecurityUtils.decrypt(cred.sshPassword)
+                            if (decryptedPass != null) {
+                                withContext(Dispatchers.IO) {
+                                    supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                                }
+                                showFeedback("Shutdown command sent via SSH")
+                            } else {
+                                showFeedback("Failed to decrypt SSH password")
+                            }
+                        } else {
+                            showFeedback("Linked SSH profile not found!")
+                        }
                     }
                 } else {
                     device.macAddress?.let {
                         WakeOnLan.sendMagicPacket(it)
-                        Toast.makeText(this@NetworkDetailActivity, "WOL Magic Packet sent", Toast.LENGTH_SHORT).show()
+                        showFeedback("WOL Magic Packet sent")
                         delay(2000)
                         performStreamingRescan()
-                    } ?: Toast.makeText(this@NetworkDetailActivity, "Missing MAC address! Run setup_fluxio.ps1 on the PC first.", Toast.LENGTH_LONG).show()
+                    } ?: showFeedback("Missing MAC address! Run setup script on the PC.")
                 }
             } catch (e: Exception) {
-                Log.e("Fluxio", "Power control failed: ${e.stackTraceToString()}")
-                Toast.makeText(this@NetworkDetailActivity, "Power control failed", Toast.LENGTH_SHORT).show()
+                showFeedback("Power control failed: ${e.message}")
             }
         }
     }
 
+    private fun showFeedback(message: String) {
+        val root = findViewById<View>(android.R.id.content)
+        val snackbar = Snackbar.make(root, message, Snackbar.LENGTH_LONG)
+        snackbar.view.setBackgroundColor(getColor(R.color.flux_card))
+        val textView = snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
+        textView.setTextColor(getColor(R.color.white))
+        snackbar.show()
+    }
+
     private fun showAddDeviceDialog() {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_edit_device, null)
+        val txtTitle = dialogView.findViewById<TextView>(R.id.txtDialogTitle)
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
         val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
-        val editUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
-        val editPass = dialogView.findViewById<EditText>(R.id.editSshPassword)
-        val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val typeSpinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val sshSpinner = dialogView.findViewById<Spinner>(R.id.spinnerSshCredentials)
+        val txtNoCreds = dialogView.findViewById<TextView>(R.id.txtNoCredentialsHint)
         val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteDevice)
         val btnSave = dialogView.findViewById<Button>(R.id.btnSaveChanges)
         val btnClose = dialogView.findViewById<Button>(R.id.btnCloseDialog)
         
+        txtTitle.text = "Add Device"
         btnDelete.visibility = View.GONE
         
         val typeList = DeviceType.entries.map { it.name }
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
+        typeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Add Device Manually")
-            .setView(dialogView)
-            .create()
+        lifecycleScope.launch {
+            val creds = supabaseRepository.getSshCredentials()
+            withContext(Dispatchers.Main) {
+                if (creds.isEmpty()) {
+                    txtNoCreds.visibility = View.VISIBLE
+                    sshSpinner.visibility = View.GONE
+                } else {
+                    val profileNames = mutableListOf("None")
+                    profileNames.addAll(creds.map { it.label })
+                    sshSpinner.adapter = ArrayAdapter(this@NetworkDetailActivity, android.R.layout.simple_spinner_item, profileNames).apply {
+                        setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                    }
+                }
+            }
+        }
 
+        val dialog = AlertDialog.Builder(this).setView(dialogView).create()
         btnClose.setOnClickListener { dialog.dismiss() }
 
         btnSave.setOnClickListener {
             val name = editName.text.toString().trim()
             val ip = editIp.text.toString().trim()
             val mac = editMac.text.toString().trim().uppercase()
-            val type = spinner.selectedItem.toString()
+            val type = typeSpinner.selectedItem.toString()
 
             if (name.isNotEmpty() && ip.isNotEmpty()) {
                 lifecycleScope.launch {
                     try {
+                        val creds = supabaseRepository.getSshCredentials()
+                        val selectedProfileIdx = sshSpinner.selectedItemPosition
+                        val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
+
                         val device = SupabaseDevice(
                             networkId = networkId,
                             name = name,
                             ipAddress = ip,
                             macAddress = mac.ifBlank { null },
-                            sshUsername = editUser.text.toString().trim(),
-                            sshPassword = editPass.text.toString().trim(),
+                            credentialId = credId,
                             deviceType = type
                         )
                         supabaseRepository.upsertDevice(device)
                         loadDevices()
                         dialog.dismiss()
+                        showFeedback("Device added")
                     } catch (e: Exception) {
-                        Log.e("Fluxio", "Manual add failed: ${e.stackTraceToString()}")
-                        Toast.makeText(this@NetworkDetailActivity, "Add failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                        showFeedback("Add failed: ${e.message}")
                     }
                 }
             } else {
-                Toast.makeText(this, "Name and IP are required", Toast.LENGTH_SHORT).show()
+                showFeedback("Name and IP are required")
             }
         }
-
         dialog.show()
     }
 
@@ -326,9 +368,9 @@ class NetworkDetailActivity : AppCompatActivity() {
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
         val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
-        val editUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
-        val editPass = dialogView.findViewById<EditText>(R.id.editSshPassword)
-        val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val typeSpinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val sshSpinner = dialogView.findViewById<Spinner>(R.id.spinnerSshCredentials)
+        val txtNoCreds = dialogView.findViewById<TextView>(R.id.txtNoCredentialsHint)
         val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteDevice)
         val btnSave = dialogView.findViewById<Button>(R.id.btnSaveChanges)
         val btnClose = dialogView.findViewById<Button>(R.id.btnCloseDialog)
@@ -336,40 +378,55 @@ class NetworkDetailActivity : AppCompatActivity() {
         editName.setText(device.name)
         editIp.setText(device.ipAddress)
         editMac.setText(device.macAddress)
-        editUser.setText(device.sshUsername)
-        editPass.setText(device.sshPassword)
 
         val typeList = DeviceType.entries.map { it.name }
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
+        typeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
         val typeIndex = typeList.indexOf(device.deviceType ?: "PC")
-        if (typeIndex != -1) spinner.setSelection(typeIndex)
+        if (typeIndex != -1) typeSpinner.setSelection(typeIndex)
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Edit Device")
-            .setView(dialogView)
-            .create()
+        lifecycleScope.launch {
+            val creds = supabaseRepository.getSshCredentials()
+            withContext(Dispatchers.Main) {
+                if (creds.isEmpty()) {
+                    txtNoCreds.visibility = View.VISIBLE
+                    sshSpinner.visibility = View.GONE
+                } else {
+                    val profileNames = mutableListOf("None")
+                    profileNames.addAll(creds.map { it.label })
+                    sshSpinner.adapter = ArrayAdapter(this@NetworkDetailActivity, android.R.layout.simple_spinner_item, profileNames).apply {
+                        setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                    }
+                    val selectedIdx = creds.indexOfFirst { it.id == device.credentialId }
+                    sshSpinner.setSelection(if (selectedIdx != -1) selectedIdx + 1 else 0)
+                }
+            }
+        }
 
+        val dialog = AlertDialog.Builder(this).setView(dialogView).create()
         btnClose.setOnClickListener { dialog.dismiss() }
 
         btnSave.setOnClickListener {
-            val updated = device.copy(
-                name = editName.text.toString().trim(),
-                ipAddress = editIp.text.toString().trim(),
-                macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
-                sshUsername = editUser.text.toString().trim(),
-                sshPassword = editPass.text.toString().trim(),
-                deviceType = spinner.selectedItem.toString()
-            )
             lifecycleScope.launch {
                 try {
+                    val creds = supabaseRepository.getSshCredentials()
+                    val selectedProfileIdx = sshSpinner.selectedItemPosition
+                    val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
+
+                    val updated = device.copy(
+                        name = editName.text.toString().trim(),
+                        ipAddress = editIp.text.toString().trim(),
+                        macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
+                        credentialId = credId,
+                        deviceType = typeSpinner.selectedItem.toString()
+                    )
                     supabaseRepository.upsertDevice(updated)
                     loadDevices()
                     dialog.dismiss()
+                    showFeedback("Device updated")
                 } catch (e: Exception) {
-                    Log.e("Fluxio", "Update failed: ${e.stackTraceToString()}")
-                    Toast.makeText(this@NetworkDetailActivity, "Update failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showFeedback("Update failed: ${e.message}")
                 }
             }
         }
@@ -384,15 +441,15 @@ class NetworkDetailActivity : AppCompatActivity() {
                             device.id?.let { supabaseRepository.deleteDevice(it) }
                             loadDevices()
                             dialog.dismiss()
+                            showFeedback("Device deleted")
                         } catch (e: Exception) {
-                            Log.e("Fluxio", "Delete failed: ${e.stackTraceToString()}")
+                            showFeedback("Delete failed")
                         }
                     }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
         }
-
         dialog.show()
     }
 
@@ -410,7 +467,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                 }
             }
         } catch (ex: Exception) {
-            Log.e("Fluxio", "IP lookup failed: ${ex.stackTraceToString()}")
+            Log.e("Fluxio", "IP lookup failed", ex)
         }
         return null
     }

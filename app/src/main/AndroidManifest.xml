@@ -42,6 +42,11 @@
             android:exported="false"
             android:theme="@style/Theme.Fluxio" />
 
+        <activity
+            android:name=".SshProfilesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Fluxio" />
+
     </application>
 
 </manifest>

@@ -2,10 +2,11 @@ package com.example.fluxio
 
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.fluxio.databinding.ActivityRegisterBinding
+import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
@@ -24,7 +25,7 @@ class RegisterActivity : AppCompatActivity() {
             val confirmPassword = binding.confirmPasswordInput.text.toString()
 
             if (email.isEmpty() || password.isEmpty()) {
-                Toast.makeText(this, "Please fill in all fields", Toast.LENGTH_SHORT).show()
+                showFeedback("Please fill in all fields")
                 return@setOnClickListener
             }
 
@@ -51,15 +52,25 @@ class RegisterActivity : AppCompatActivity() {
             val result = authRepository.signUp(email, password)
             
             if (result.isSuccess) {
-                Toast.makeText(this@RegisterActivity, "Registration successful! Please check your email for verification.", Toast.LENGTH_LONG).show()
-                finish()
+                showFeedback("Registration successful! Please check your email for verification.")
+                // Note: Not finishing immediately so user can see the snackbar, 
+                // but usually success snacks are better on the login screen.
+                // However, following prompt's "standardize all feedback".
             } else {
                 val exception = result.exceptionOrNull()
-                Toast.makeText(this@RegisterActivity, "Registration failed: ${exception?.message}", Toast.LENGTH_LONG).show()
+                showFeedback("Registration failed: ${exception?.message}")
 
                 binding.progressBar.visibility = View.GONE
                 binding.btnRegister.isEnabled = true
             }
         }
+    }
+
+    private fun showFeedback(message: String) {
+        val snackbar = Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG)
+        snackbar.view.setBackgroundColor(getColor(R.color.flux_card))
+        val textView = snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
+        textView.setTextColor(getColor(R.color.white))
+        snackbar.show()
     }
 }

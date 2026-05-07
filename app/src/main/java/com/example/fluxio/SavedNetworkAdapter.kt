@@ -3,20 +3,22 @@ package com.example.fluxio
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import java.text.SimpleDateFormat
-import java.util.*
 
 class SavedNetworkAdapter(
     private var networks: List<SupabaseNetwork>,
     private val onClick: (SupabaseNetwork) -> Unit,
-    private val onLongClick: (SupabaseNetwork) -> Unit
+    private val onEdit: (SupabaseNetwork) -> Unit,
+    private val onDelete: (SupabaseNetwork) -> Unit
 ) : RecyclerView.Adapter<SavedNetworkAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val nameTextView: TextView = view.findViewById(R.id.txtNetworkName)
         val detailsTextView: TextView = view.findViewById(R.id.txtNetworkDetails)
+        val btnEdit: ImageButton = view.findViewById(R.id.btnEditNetwork)
+        val btnDelete: ImageButton = view.findViewById(R.id.btnDeleteNetwork)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -29,15 +31,12 @@ class SavedNetworkAdapter(
         val network = networks[position]
         holder.nameTextView.text = network.name
         
-        // Supabase timestamp is usually ISO8601 string
-        val dateString = network.timestamp?.take(16)?.replace("T", " ") ?: "Unknown date"
+        val dateString = network.timestamp?.take(10) ?: "Unknown date"
         holder.detailsTextView.text = "$dateString | ${network.deviceCount} devices"
 
         holder.itemView.setOnClickListener { onClick(network) }
-        holder.itemView.setOnLongClickListener {
-            onLongClick(network)
-            true
-        }
+        holder.btnEdit.setOnClickListener { onEdit(network) }
+        holder.btnDelete.setOnClickListener { onDelete(network) }
     }
 
     fun updateList(newList: List<SupabaseNetwork>) {

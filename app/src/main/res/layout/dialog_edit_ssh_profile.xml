@@ -15,7 +15,7 @@
             android:id="@+id/txtDialogTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Device Configuration"
+            android:text="SSH Profile"
             android:textColor="@color/white"
             android:textSize="20sp"
             android:textStyle="bold"
@@ -24,12 +24,12 @@
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Device Name"
+            android:hint="Profile Label (e.g. Home Server)"
             android:textColorHint="@color/text_secondary"
             app:hintTextColor="@color/flux_neon_blue"
             style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editDeviceName"
+                android:id="@+id/editProfileLabel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
@@ -40,12 +40,12 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="IP Address"
+            android:hint="SSH Username"
             android:textColorHint="@color/text_secondary"
             app:hintTextColor="@color/flux_neon_blue"
             style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editDeviceIp"
+                android:id="@+id/editProfileUsername"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
@@ -56,96 +56,38 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:hint="MAC Address"
+            android:hint="SSH Password"
             android:textColorHint="@color/text_secondary"
             app:hintTextColor="@color/flux_neon_blue"
+            app:passwordToggleEnabled="true"
+            app:passwordToggleTint="@color/text_secondary"
             style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
             <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editDeviceMac"
+                android:id="@+id/editProfilePassword"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
-                android:inputType="textCapCharacters" />
+                android:inputType="textPassword" />
         </com.google.android.material.textfield.TextInputLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Device Type"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="4dp"/>
-
-        <Spinner
-            android:id="@+id/spinnerDeviceType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:backgroundTint="@color/white"
-            android:minHeight="48dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="SSH Credential Profile"
-            android:textStyle="bold"
-            android:textColor="@color/text_primary"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="8dp"/>
-
-        <Spinner
-            android:id="@+id/spinnerSshCredentials"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="48dp"
-            android:backgroundTint="@color/white" />
-
-        <TextView
-            android:id="@+id/txtNoCredentialsHint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="No profiles found. Add one in the side menu."
-            android:textSize="12sp"
-            android:visibility="gone"
-            android:textColor="@color/flux_neon_red"
-            android:layout_marginTop="4dp"/>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="32dp"
             android:orientation="horizontal"
-            android:gravity="end|center_vertical">
+            android:gravity="end">
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDeleteDevice"
+                android:id="@+id/btnCancelProfile"
                 style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="DELETE"
-                android:textColor="@color/flux_neon_red"
-                android:paddingHorizontal="8dp"
-                android:minWidth="0dp"
-                android:textSize="13sp"
-                android:insetLeft="0dp"
-                android:insetRight="0dp"
-                app:rippleColor="#33FF1744" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnCloseDialog"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="CLOSE"
+                android:text="CANCEL"
                 android:textColor="@color/white"
-                android:paddingHorizontal="8dp"
-                android:minWidth="0dp"
-                android:textSize="13sp"
-                android:insetLeft="0dp"
-                android:insetRight="0dp" />
+                android:paddingHorizontal="16dp" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSaveChanges"
+                android:id="@+id/btnSaveProfile"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
@@ -153,8 +95,7 @@
                 android:text="SAVE"
                 android:textColor="@color/black"
                 android:textStyle="bold"
-                android:paddingHorizontal="16dp"
-                android:textSize="13sp"
+                android:paddingHorizontal="24dp"
                 app:cornerRadius="4dp" />
 
         </LinearLayout>

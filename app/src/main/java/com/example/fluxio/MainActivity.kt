@@ -203,7 +203,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val clip = android.content.ClipData.newPlainText("Fluxio Setup", text)
         cm.setPrimaryClip(clip)
-        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
+        showFeedback(label)
     }
 
     private fun checkConnectivity() {
@@ -212,7 +212,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val caps = cm.getNetworkCapabilities(activeNetwork)
         val isConnected = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         if (!isConnected) {
-            Snackbar.make(findViewById(android.R.id.content), "No internet connection", Snackbar.LENGTH_LONG).show()
+            showFeedback("No internet connection")
         }
     }
 
@@ -222,7 +222,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val caps = cm.getNetworkCapabilities(activeNetwork)
         val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         if (!isWifi) {
-            Snackbar.make(findViewById(android.R.id.content), getString(R.string.no_wifi), Snackbar.LENGTH_LONG).show()
+            showFeedback(getString(R.string.no_wifi))
         }
     }
 
@@ -231,34 +231,54 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             try {
                 val typeName = (device.deviceType ?: device.type)?.uppercase() ?: "PC"
                 if (typeName != "PC") {
-                    Toast.makeText(this@MainActivity, "Power management only for PCs", Toast.LENGTH_SHORT).show()
+                    showFeedback("Power management only for PCs")
                     return@launch
                 }
 
                 val statusLabel = device.status ?: "Offline"
                 if (statusLabel.lowercase() == "active" || statusLabel.lowercase() == "online") {
-                    if (device.id.isNullOrBlank()) {
-                        Toast.makeText(this@MainActivity, "Device not saved yet!", Toast.LENGTH_LONG).show()
+                    if (device.credentialId.isNullOrBlank()) {
+                        showFeedback("No SSH profile linked! Edit device to link one.")
                     } else {
-                        Toast.makeText(this@MainActivity, "Sending Shutdown command...", Toast.LENGTH_SHORT).show()
-                        withContext(Dispatchers.IO) {
-                            supabaseRepository.updatePendingCommand(device.id!!, "shutdown")
+                        showFeedback("Sending Shutdown command...")
+                        val cred = supabaseRepository.getCredentialById(device.credentialId)
+                        if (cred != null) {
+                            val decryptedPass = SecurityUtils.decrypt(cred.sshPassword)
+                            if (decryptedPass != null) {
+                                withContext(Dispatchers.IO) {
+                                    supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                                }
+                                showFeedback("Shutdown command sent via SSH")
+                            } else {
+                                showFeedback("Failed to decrypt SSH password")
+                            }
+                        } else {
+                            showFeedback("Linked SSH profile not found!")
                         }
                     }
                 } else {
                     if (device.macAddress.isNullOrBlank()) {
-                        Toast.makeText(this@MainActivity, "Missing MAC address! Run setup_fluxio.ps1 on the PC first.", Toast.LENGTH_LONG).show()
+                        showFeedback("Missing MAC address! Run setup script on the PC.")
                     } else {
-                        Toast.makeText(this@MainActivity, "Sending Magic Packet...", Toast.LENGTH_SHORT).show()
+                        showFeedback("Sending Magic Packet...")
                         WakeOnLan.sendMagicPacket(device.macAddress!!)
                         delay(3000)
                         startSmartScan() 
                     }
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Power control failed", Toast.LENGTH_SHORT).show()
+                showFeedback("Power control failed: ${e.message}")
             }
         }
+    }
+
+    private fun showFeedback(message: String) {
+        val root = findViewById<View>(android.R.id.content)
+        val snackbar = Snackbar.make(root, message, Snackbar.LENGTH_LONG)
+        snackbar.view.setBackgroundColor(getColor(R.color.flux_card))
+        val textView = snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
+        textView.setTextColor(getColor(R.color.white))
+        snackbar.show()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -279,6 +299,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         when (item.itemId) {
             R.id.nav_current -> showCurrentNetwork()
             R.id.nav_saved -> showSavedNetworks()
+            R.id.nav_ssh_profiles -> startActivity(Intent(this, SshProfilesActivity::class.java))
             R.id.nav_setup -> showSetupGuide()
             R.id.nav_logout -> {
                 lifecycleScope.launch {
@@ -294,7 +315,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     private fun showSaveDialog() {
         if (currentScanResults.isEmpty()) {
-            Toast.makeText(this, "No devices discovered!", Toast.LENGTH_SHORT).show()
+            showFeedback("No devices discovered!")
             return
         }
         val input = EditText(this).apply { hint = getString(R.string.hint_network_name) }
@@ -309,12 +330,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         try {
                             val networks = supabaseRepository.getNetworks()
                             if (networks.any { it.name.equals(name, ignoreCase = true) }) {
-                                Toast.makeText(this@MainActivity, "Name already exists!", Toast.LENGTH_SHORT).show()
+                                showFeedback("Name already exists!")
                             } else {
                                 saveNetworkToSupabase(name)
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(this@MainActivity, "Error checking networks", Toast.LENGTH_SHORT).show()
+                            showFeedback("Error checking networks")
                         }
                     }
                 }
@@ -328,11 +349,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         try {
             val user = authRepository.getCurrentUser() ?: return
             
-            // Transactional Saving Flow: Save/Upsert the Network and retrieve its id.
             val network = supabaseRepository.upsertNetwork(name, user.id)
             createdNetworkId = network.id ?: throw Exception("Failed to retrieve Network ID")
 
-            // Map that id to all discovered Devices.
             val devicesToSave = currentScanResults.map { 
                 it.copy(
                     networkId = createdNetworkId!!, 
@@ -340,27 +359,22 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     macAddress = it.macAddress?.uppercase()
                 ) 
             }
-            // Perform a bulk upsert for all devices with conflict handling.
             supabaseRepository.saveDevices(devicesToSave)
 
             withContext(Dispatchers.Main) {
-                Snackbar.make(findViewById(android.R.id.content), "Network '$name' saved successfully!", Snackbar.LENGTH_LONG).show()
+                showFeedback("Network '$name' saved successfully!")
                 btnSave.isEnabled = false
                 currentScanResults.clear()
                 currentDeviceAdapter.updateList(emptyList())
             }
         } catch (e: Exception) {
-            // Cleanup: if saving devices fails, delete the newly created/touched network to prevent 'empty' networks.
             try {
                 createdNetworkId?.let { supabaseRepository.deleteNetwork(it) }
-            } catch (cleanupError: Exception) {
-                Log.e("Fluxio", "Cleanup failed after original error", cleanupError)
-            }
+            } catch (_: Exception) {}
 
             withContext(Dispatchers.Main) {
-                // Print full error message to Logcat for debugging.
                 Log.e("Fluxio", "Critical Save Error: ${e.stackTraceToString()}")
-                Toast.makeText(this@MainActivity, "Error saving: ${e.message}", Toast.LENGTH_LONG).show()
+                showFeedback("Error saving: ${e.message}")
             }
         }
     }
@@ -384,14 +398,41 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                                 }
                                 startActivity(intent)
                             },
-                            onLongClick = { network -> showDeleteNetworkDialog(network) }
+                            onEdit = { network -> showRenameNetworkDialog(network) },
+                            onDelete = { network -> showDeleteNetworkDialog(network) }
                         )
                     }
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Error loading networks", Toast.LENGTH_SHORT).show()
+                showFeedback("Error loading networks")
             }
         }
+    }
+
+    private fun showRenameNetworkDialog(network: SupabaseNetwork) {
+        val input = EditText(this).apply {
+            hint = "New name"
+            setText(network.name)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Rename Network")
+            .setView(input)
+            .setPositiveButton("Rename") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty() && newName != network.name) {
+                    lifecycleScope.launch {
+                        try {
+                            network.id?.let { supabaseRepository.updateNetworkName(it, newName) }
+                            loadSavedNetworks()
+                            showFeedback("Network renamed")
+                        } catch (e: Exception) {
+                            showFeedback("Rename failed")
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showDeleteNetworkDialog(network: SupabaseNetwork) {
@@ -404,7 +445,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         network.id?.let { supabaseRepository.deleteNetwork(it) }
                         loadSavedNetworks()
                     } catch (e: Exception) {
-                        Toast.makeText(this@MainActivity, "Error deleting network", Toast.LENGTH_SHORT).show()
+                        showFeedback("Error deleting network")
                     }
                 }
             }
@@ -417,7 +458,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             try {
                 val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() } ?: run {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, getString(R.string.no_ip), Toast.LENGTH_SHORT).show()
+                        showFeedback(getString(R.string.no_ip))
                         swipeRefreshMain.isRefreshing = false
                     }
                     return@launch
@@ -447,7 +488,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     swipeRefreshMain.isRefreshing = false
                     btnScan.isEnabled = true
                     btnSave.isEnabled = currentScanResults.isNotEmpty()
-                    Toast.makeText(this@MainActivity, getString(R.string.scan_finished), Toast.LENGTH_SHORT).show()
+                    showFeedback(getString(R.string.scan_finished))
                 }
             } catch (e: Exception) {
                 Log.e("Fluxio", "Main scan crash prevented", e)
@@ -455,7 +496,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     progressContainer.visibility = View.GONE
                     swipeRefreshMain.isRefreshing = false
                     btnScan.isEnabled = true
-                    Toast.makeText(this@MainActivity, "Scan failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showFeedback("Scan failed: ${e.message}")
                 }
             }
         }
@@ -500,47 +541,77 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val editName = dialogView.findViewById<EditText>(R.id.editDeviceName)
         val editIp = dialogView.findViewById<EditText>(R.id.editDeviceIp)
         val editMac = dialogView.findViewById<EditText>(R.id.editDeviceMac)
-        val editUser = dialogView.findViewById<EditText>(R.id.editSshUsername)
-        val editPass = dialogView.findViewById<EditText>(R.id.editSshPassword)
-        val spinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val typeSpinner = dialogView.findViewById<Spinner>(R.id.spinnerDeviceType)
+        val sshSpinner = dialogView.findViewById<Spinner>(R.id.spinnerSshCredentials)
+        val txtNoCreds = dialogView.findViewById<TextView>(R.id.txtNoCredentialsHint)
+        val btnDelete = dialogView.findViewById<Button>(R.id.btnDeleteDevice)
+        val btnClose = dialogView.findViewById<Button>(R.id.btnCloseDialog)
+        val btnSave = dialogView.findViewById<Button>(R.id.btnSaveChanges)
         
         editName.setText(device.name)
         editIp.setText(device.ipAddress)
         editIp.isEnabled = false
         editMac.setText(device.macAddress ?: "")
-        editUser.setText(device.sshUsername ?: "")
-        editPass.setText(device.sshPassword ?: "")
 
         val typeList = DeviceType.entries.map { it.name }
-        spinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
+        typeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, typeList).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
         val currentType = (device.deviceType ?: device.type) ?: "PC"
-        spinner.setSelection(typeList.indexOf(currentType.uppercase()).coerceAtLeast(0))
+        typeSpinner.setSelection(typeList.indexOf(currentType.uppercase()).coerceAtLeast(0))
+
+        lifecycleScope.launch {
+            val creds = supabaseRepository.getSshCredentials()
+            withContext(Dispatchers.Main) {
+                if (creds.isEmpty()) {
+                    txtNoCreds.visibility = View.VISIBLE
+                    sshSpinner.visibility = View.GONE
+                } else {
+                    txtNoCreds.visibility = View.GONE
+                    sshSpinner.visibility = View.VISIBLE
+                    val profileNames = mutableListOf("None")
+                    profileNames.addAll(creds.map { it.label })
+                    sshSpinner.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, profileNames).apply {
+                        setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                    }
+                    val selectedIdx = creds.indexOfFirst { it.id == device.credentialId }
+                    sshSpinner.setSelection(if (selectedIdx != -1) selectedIdx + 1 else 0)
+                }
+            }
+        }
 
         val dialog = AlertDialog.Builder(this).setView(dialogView).create()
 
-        dialogView.findViewById<Button>(R.id.btnSaveChanges).setOnClickListener {
-            val updated = device.copy(
-                name = editName.text.toString().trim(),
-                macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
-                sshUsername = editUser.text.toString().trim().ifBlank { null },
-                sshPassword = editPass.text.toString().ifBlank { null },
-                deviceType = spinner.selectedItem.toString(),
-                type = spinner.selectedItem.toString()
-            )
-            val index = currentScanResults.indexOfFirst { it.ipAddress == device.ipAddress }
-            if (index != -1) {
-                currentScanResults[index] = updated
-                currentDeviceAdapter.addOrUpdateDevice(updated)
+        btnClose.setOnClickListener { dialog.dismiss() }
+
+        btnSave.setOnClickListener {
+            lifecycleScope.launch {
+                val creds = supabaseRepository.getSshCredentials()
+                val selectedProfileIdx = sshSpinner.selectedItemPosition
+                val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
+                
+                val updated = device.copy(
+                    name = editName.text.toString().trim(),
+                    macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
+                    credentialId = credId,
+                    deviceType = typeSpinner.selectedItem.toString(),
+                    type = typeSpinner.selectedItem.toString()
+                )
+                val index = currentScanResults.indexOfFirst { it.ipAddress == device.ipAddress }
+                if (index != -1) {
+                    currentScanResults[index] = updated
+                    currentDeviceAdapter.addOrUpdateDevice(updated)
+                }
+                dialog.dismiss()
+                showFeedback("Changes saved locally")
             }
-            dialog.dismiss()
         }
 
-        dialogView.findViewById<Button>(R.id.btnDeleteDevice).setOnClickListener {
+        btnDelete.setOnClickListener {
             currentScanResults.removeAll { it.ipAddress == device.ipAddress }
             currentDeviceAdapter.updateList(ArrayList(currentScanResults))
             dialog.dismiss()
+            showFeedback("Device removed from scan")
         }
         dialog.show()
     }
