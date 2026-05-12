@@ -1,5 +1,5 @@
 # ==============================================================================
-# FLUXIO DEPLOYMENT SCRIPT (v2.1 - Upsert Enabled)
+# FLUXIO DEPLOYMENT SCRIPT v2.1
 # ==============================================================================
 
 $URL = "https://vbpmfulxbpcuboirjokv.supabase.co/rest/v1/devices"
@@ -9,16 +9,16 @@ $FLUX_PASS = "fluxio_user"
 
 Write-Host "--- Fluxio System Setup v2.1 ---" -ForegroundColor Cyan
 
-# 1. Ustvarjanje uporabnika (Popravljeno za vse verzije Windows)
+# 1. Popravljeno ustvarjanje uporabnika (brez napak iz image_9b2790.png)
 Write-Host "[1/4] Configuring dedicated user..." -ForegroundColor White
 if (Get-LocalUser | Where-Object { $_.Name -eq $FLUX_USER }) {
-    Write-Host "User exists." -ForegroundColor Yellow
+    Write-Host "User already exists." -ForegroundColor Yellow
 } else {
     $Password = ConvertTo-SecureString $FLUX_PASS -AsPlainText -Force
     New-LocalUser -Name $FLUX_USER -Password $Password -Description "Fluxio SSH Account"
     Set-LocalUser -Name $FLUX_USER -PasswordNeverExpires $true
     Add-LocalGroupMember -Group "Administrators" -Member $FLUX_USER
-    Write-Host "User created." -ForegroundColor Green
+    Write-Host "User created successfully." -ForegroundColor Green
 }
 
 # 2. SSH & Wake-on-LAN
@@ -28,7 +28,7 @@ Start-Service sshd -ErrorAction SilentlyContinue
 Set-Service -Name sshd -StartupType 'Automatic'
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Set-NetAdapterPowerManagement -WakeOnMagicPacket Enabled -ErrorAction SilentlyContinue
 
-# 3. Omejitev SSH dostopa
+# 3. Varovanje SSH (AllowUsers)
 Write-Host "[3/4] Securing SSH..." -ForegroundColor White
 $sshdConfig = "$env:ProgramData\ssh\sshd_config"
 if ((Get-Content $sshdConfig) -notmatch "AllowUsers $FLUX_USER") {
@@ -36,7 +36,7 @@ if ((Get-Content $sshdConfig) -notmatch "AllowUsers $FLUX_USER") {
     Restart-Service sshd
 }
 
-# 4. Sinhronizacija (UPSERT LOGIKA)
+# 4. Sinhronizacija (UPSERT - deluje tudi brez predhodnega skeniranja)
 Write-Host "[4/4] Syncing with Cloud..." -ForegroundColor White
 $IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.InterfaceAlias -notlike "*vEthernet*" -and $_.IPAddress -notlike "169.254.*" }).IPAddress[0]
 $MAC = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress[0]
@@ -51,14 +51,14 @@ $Body = @{
 } | ConvertTo-Json
 
 try {
-    # POST + Prefer: resolution=merge-duplicates naredi UPSERT (vstavi ali posodobi)
+    # Uporabimo POST + Prefer: resolution=merge-duplicates (UPSERT)
     Invoke-RestMethod -Uri $URL -Method Post -Headers @{ 
         "apikey" = $API_KEY; 
         "Authorization" = "Bearer $API_KEY"; 
         "Content-Type" = "application/json";
         "Prefer" = "resolution=merge-duplicates" 
     } -Body $Body
-    Write-Host "SUCCESS: PC $env:COMPUTERNAME is synced and ready." -ForegroundColor Green
+    Write-Host "SUCCESS: PC synced and ready." -ForegroundColor Green
 } catch {
-    Write-Host "ERROR: Sync failed. Make sure you ran the SQL script in Supabase!" -ForegroundColor Red
+    Write-Host "ERROR: Sync failed. Did you run the SQL cleanup in Supabase?" -ForegroundColor Red
 }
