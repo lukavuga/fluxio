@@ -51,14 +51,15 @@ $Body = @{
 } | ConvertTo-Json
 
 try {
-    # Uporabimo POST + Prefer: resolution=merge-duplicates (UPSERT)
+    # UPORABI "Post" namesto "Patch" in dodaj "Prefer" glavo
     Invoke-RestMethod -Uri $URL -Method Post -Headers @{ 
         "apikey" = $API_KEY; 
         "Authorization" = "Bearer $API_KEY"; 
         "Content-Type" = "application/json";
-        "Prefer" = "resolution=merge-duplicates" 
+        "Prefer" = "resolution=merge-duplicates"  # TA VRSTICA JE NAJPOMEMBNEJŠA
     } -Body $Body
-    Write-Host "SUCCESS: PC synced and ready." -ForegroundColor Green
+    Write-Host "SUCCESS: PC $env:COMPUTERNAME synced ($IP)." -ForegroundColor Green
 } catch {
-    Write-Host "ERROR: Sync failed. Did you run the SQL cleanup in Supabase?" -ForegroundColor Red
+    $err = $_.Exception.Message
+    Write-Host "ERROR: Sync failed. Message: $err" -ForegroundColor Red
 }
