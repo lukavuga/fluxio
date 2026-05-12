@@ -1,55 +1,62 @@
 # ==============================================================================
-# FLUXIO DEPLOYMENT SCRIPT (Windows - Optimized)
+# FLUXIO DEPLOYMENT SCRIPT (Windows - v2.0)
 # ==============================================================================
 
 $URL = "https://vbpmfulxbpcuboirjokv.supabase.co/rest/v1/devices"
 $API_KEY = "sb_publishable_RtG4GlKSSxRk3fCLYfXwjA_a-d50Yvp"
+$FLUX_USER = "fluxio_user"
+$FLUX_PASS = "fluxio_user"
 
 Write-Host "--- Fluxio System Setup ---" -ForegroundColor Cyan
 
-# 1. Omogočanje SSH strežnika
-Write-Host "[1/3] Configuring SSH..." -ForegroundColor White
+# 1. Ustvarjanje fluxio_user uporabnika
+Write-Host "[1/5] Creating dedicated Fluxio user..." -ForegroundColor White
+if (Get-LocalUser | Where-Object { $_.Name -eq $FLUX_USER }) {
+    Write-Host "User already exists." -ForegroundColor Yellow
+} else {
+    $Password = ConvertTo-SecureString $FLUX_PASS -AsPlainText -Force
+    New-LocalUser -Name $FLUX_USER -Password $Password -Description "Used for Fluxio SSH Shutdown" -PasswordNeverExpires $true
+    Add-LocalGroupMember -Group "Administrators" -Member $FLUX_USER # Potrebno za ukaz 'shutdown'
+    Write-Host "User created successfully." -ForegroundColor Green
+}
+
+# 2. Omogočanje SSH strežnika
+Write-Host "[2/5] Configuring SSH Server..." -ForegroundColor White
 Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue
 Start-Service sshd -ErrorAction SilentlyContinue
 Set-Service -Name sshd -StartupType 'Automatic'
 
-# 2. Omogočanje Wake-on-LAN na mrežni kartici
-Write-Host "[2/3] Configuring Wake-on-LAN..." -ForegroundColor White
+# 3. Omejitev SSH samo na fluxio_user
+Write-Host "[3/5] Securing SSH access..." -ForegroundColor White
+$sshdConfig = "$env:ProgramData\ssh\sshd_config"
+if (Test-Path $sshdConfig) {
+    $content = Get-Content $sshdConfig
+    if ($content -notmatch "AllowUsers $FLUX_USER") {
+        Add-Content $sshdConfig "`nAllowUsers $FLUX_USER"
+        Restart-Service sshd
+    }
+}
+
+# 4. Omogočanje Wake-on-LAN
+Write-Host "[4/5] Configuring Wake-on-LAN..." -ForegroundColor White
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Set-NetAdapterPowerManagement -WakeOnMagicPacket Enabled -ErrorAction SilentlyContinue
 
-# 3. Pridobivanje podatkov naprave
-Write-Host "[3/3] Synchronizing with Fluxio Cloud..." -ForegroundColor White
-
-# Pridobimo IP (izogibamo se virtualnim adapterjem)
-$IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 
-    $_.InterfaceAlias -notlike "*Loopback*" -and 
-    $_.InterfaceAlias -notlike "*vEthernet*" -and 
-    $_.IPAddress -notlike "169.254.*" 
-}).IPAddress[0]
-
-# POPRAVEK: Pridobimo samo en MAC naslov (prvi aktivni)
+# 5. Sinhronizacija s Cloudom
+Write-Host "[5/5] Synchronizing with Fluxio Cloud..." -ForegroundColor White
+$IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.InterfaceAlias -notlike "*vEthernet*" -and $_.IPAddress -notlike "169.254.*" }).IPAddress[0]
 $MAC = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress[0]
 
-# Priprava telesa za PATCH (posodobitev obstoječe vrstice po IP-ju)
 $Body = @{ 
     mac_address = $MAC; 
     status = "Online";
-    device_type = "Computer"; # Ker se ta skripta izvaja na Windowsu, je to PC
+    device_type = "PC";
     last_seen = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 } | ConvertTo-Json
 
-# Naslovimo napravo v bazi preko njenega IP naslova
 $TargetURL = "$URL?ip_address=eq.$IP"
-
 try {
-    # Uporabimo PATCH, da ne ustvarjamo novih vrstic, ampak samo dopolnimo tisto,
-    # ki jo je ustvarila aplikacija med skeniranjem.
-    Invoke-RestMethod -Uri $TargetURL -Method Patch -Headers @{ 
-        "apikey" = $API_KEY; 
-        "Authorization" = "Bearer $API_KEY"; 
-        "Content-Type" = "application/json"
-    } -Body $Body
-    Write-Host "SUCCESS: Device synced via IP $IP ($MAC)" -ForegroundColor Green
+    Invoke-RestMethod -Uri $TargetURL -Method Patch -Headers @{ "apikey" = $API_KEY; "Authorization" = "Bearer $API_KEY"; "Content-Type" = "application/json" } -Body $Body
+    Write-Host "SUCCESS: PC synced via $IP ($MAC). fluxio_user is ready." -ForegroundColor Green
 } catch {
-    Write-Host "ERROR: Device with IP $IP not found. Make sure to SCAN and SAVE the network in the app first." -ForegroundColor Red
+    Write-Host "ERROR: Device not found in DB. Scan in the app first!" -ForegroundColor Red
 }
