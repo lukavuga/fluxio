@@ -28,6 +28,7 @@ import kotlinx.coroutines.withContext
 class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
     private lateinit var drawerLayout: DrawerLayout
+    private lateinit var navView: NavigationView
     private lateinit var adapter: SshProfileAdapter
     private val supabaseRepository = SupabaseRepository()
     private val authRepository = AuthRepository(SupabaseInstance.client)
@@ -42,7 +43,7 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
         supportActionBar?.title = "SSH Profiles"
 
         drawerLayout = findViewById(R.id.drawer_layout_ssh)
-        val navView = findViewById<NavigationView>(R.id.nav_view_ssh)
+        navView = findViewById<NavigationView>(R.id.nav_view_ssh)
 
         val toggle = ActionBarDrawerToggle(
             this, drawerLayout, toolbar,
@@ -63,7 +64,7 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
 
         adapter = SshProfileAdapter(mutableListOf(), 
             onEdit = { profile -> showAddEditDialog(profile) },
-            onDelete = { profile -> showDeleteConfirmDialog(profile) }
+            onDelete = { profile -> handleProfileAction(profile) }
         )
 
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -85,42 +86,51 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
         loadProfiles()
     }
 
+    override fun onResume() {
+        super.onResume()
+        navView.setCheckedItem(R.id.nav_ssh_profiles)
+    }
+
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
-            R.id.nav_current -> {
-                val intent = Intent(this, MainActivity::class.java)
-                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                intent.putExtra("SHOW_LAYOUT", "CURRENT")
-                startActivity(intent)
-                finish()
-            }
-            R.id.nav_saved -> {
-                val intent = Intent(this, MainActivity::class.java)
-                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                intent.putExtra("SHOW_LAYOUT", "SAVED")
-                startActivity(intent)
-                finish()
-            }
-            R.id.nav_ssh_profiles -> {
-                // Already here
-            }
-            R.id.nav_setup -> {
-                val intent = Intent(this, MainActivity::class.java)
-                intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                intent.putExtra("SHOW_LAYOUT", "SETUP")
-                startActivity(intent)
-                finish()
-            }
-            R.id.nav_logout -> {
-                lifecycleScope.launch {
-                    authRepository.signOut()
-                    val intent = Intent(this@SshProfilesActivity, LoginActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    startActivity(intent)
+        if (item.itemId == R.id.nav_ssh_profiles) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            return true
+        }
+
+        drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
+            override fun onDrawerClosed(drawerView: View) {
+                val intent = when (item.itemId) {
+                    R.id.nav_current -> Intent(this@SshProfilesActivity, MainActivity::class.java).apply {
+                        putExtra("SHOW_LAYOUT", "CURRENT")
+                    }
+                    R.id.nav_saved -> Intent(this@SshProfilesActivity, MainActivity::class.java).apply {
+                        putExtra("SHOW_LAYOUT", "SAVED")
+                    }
+                    R.id.nav_setup -> Intent(this@SshProfilesActivity, MainActivity::class.java).apply {
+                        putExtra("SHOW_LAYOUT", "SETUP")
+                    }
+                    R.id.nav_logout -> {
+                        lifecycleScope.launch {
+                            authRepository.signOut()
+                            val logoutIntent = Intent(this@SshProfilesActivity, LoginActivity::class.java)
+                            logoutIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            startActivity(logoutIntent)
+                            finish()
+                        }
+                        null
+                    }
+                    else -> null
+                }
+
+                intent?.let {
+                    it.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    startActivity(it)
                     finish()
                 }
+                drawerLayout.removeDrawerListener(this)
             }
-        }
+        })
+
         drawerLayout.closeDrawer(GravityCompat.START)
         return true
     }
@@ -153,7 +163,12 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
         profile?.let {
             editLabel.setText(it.label)
             editUser.setText(it.sshUsername)
-            editPass.setText(SecurityUtils.decrypt(it.sshPassword) ?: "")
+            editPass.setText(SecurityUtils.decrypt(it.sshPassword) ?: it.sshPassword)
+            
+            if (it.label == "Fluxio Default") {
+                editLabel.isEnabled = false
+                editUser.isEnabled = false
+            }
         }
 
         val dialog = AlertDialog.Builder(this)
@@ -181,7 +196,8 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
                         userId = userId,
                         label = label,
                         sshUsername = user,
-                        sshPassword = encryptedPassword
+                        sshPassword = encryptedPassword,
+                        isEnabled = profile?.isEnabled ?: true
                     )
                     supabaseRepository.upsertSshCredential(newProfile)
                     loadProfiles()
@@ -196,7 +212,24 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
         dialog.show()
     }
 
-    private fun showDeleteConfirmDialog(profile: SshCredential) {
+    private fun handleProfileAction(profile: SshCredential) {
+        if (profile.label == "Fluxio Default") {
+            // Immediate toggle logic for default profile as per requirement
+            val updated = profile.copy(isEnabled = !profile.isEnabled)
+            lifecycleScope.launch {
+                try {
+                    supabaseRepository.upsertSshCredential(updated)
+                    loadProfiles()
+                    val state = if (updated.isEnabled) "enabled" else "disabled"
+                    showFeedback("Default profile $state")
+                } catch (e: Exception) {
+                    showFeedback("Toggle failed: ${e.message}")
+                }
+            }
+            return
+        }
+
+        // Regular delete for other profiles
         AlertDialog.Builder(this)
             .setTitle("Delete Profile")
             .setMessage("Are you sure you want to delete '${profile.label}'?")

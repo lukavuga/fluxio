@@ -110,6 +110,7 @@
             android:textColor="@color/flux_neon_red"
             android:layout_marginTop="4dp"/>
 
+        <!-- Fix: Horizontal LinearLayout for all buttons -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -119,42 +120,38 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDeleteDevice"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                style="?attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="DELETE"
                 android:textColor="@color/flux_neon_red"
-                android:paddingHorizontal="8dp"
+                android:paddingHorizontal="4dp"
                 android:minWidth="0dp"
-                android:textSize="13sp"
-                android:insetLeft="0dp"
-                android:insetRight="0dp"
+                android:textSize="12sp"
                 app:rippleColor="#33FF1744" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnCloseDialog"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                style="?attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="CLOSE"
                 android:textColor="@color/white"
-                android:paddingHorizontal="8dp"
+                android:paddingHorizontal="4dp"
                 android:minWidth="0dp"
-                android:textSize="13sp"
-                android:insetLeft="0dp"
-                android:insetRight="0dp" />
+                android:textSize="12sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSaveChanges"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:layout_marginStart="4dp"
                 android:backgroundTint="@color/flux_neon_blue"
                 android:text="SAVE"
                 android:textColor="@color/black"
                 android:textStyle="bold"
-                android:paddingHorizontal="16dp"
-                android:textSize="13sp"
+                android:paddingHorizontal="12dp"
+                android:textSize="12sp"
                 app:cornerRadius="4dp" />
 
         </LinearLayout>

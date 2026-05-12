@@ -251,14 +251,21 @@ class NetworkDetailActivity : AppCompatActivity() {
                         showFeedback("Sending Shutdown command...")
                         val cred = supabaseRepository.getCredentialById(device.credentialId)
                         if (cred != null) {
-                            val decryptedPass = SecurityUtils.decrypt(cred.sshPassword)
-                            if (decryptedPass != null) {
-                                withContext(Dispatchers.IO) {
+                            val decryptedPass = try {
+                                SecurityUtils.decrypt(cred.sshPassword) ?: cred.sshPassword
+                            } catch (e: Exception) {
+                                Log.e("Fluxio", "Decryption failed for profile: ${cred.label}. Falling back to raw string.")
+                                cred.sshPassword // Use the raw string if decryption fails
+                            }
+                            
+                            withContext(Dispatchers.IO) {
+                                try {
                                     supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        showFeedback("SSH command failed. Ensure PC is running the Fluxio Agent.")
+                                    }
                                 }
-                                showFeedback("Shutdown command sent via SSH")
-                            } else {
-                                showFeedback("Failed to decrypt SSH password")
                             }
                         } else {
                             showFeedback("Linked SSH profile not found!")
@@ -309,12 +316,15 @@ class NetworkDetailActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            val creds = supabaseRepository.getSshCredentials()
+            val allCreds = supabaseRepository.getSshCredentials()
+            val creds = allCreds.filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
                     sshSpinner.visibility = View.GONE
                 } else {
+                    txtNoCreds.visibility = View.GONE
+                    sshSpinner.visibility = View.VISIBLE
                     val profileNames = mutableListOf("None")
                     profileNames.addAll(creds.map { it.label })
                     sshSpinner.adapter = ArrayAdapter(this@NetworkDetailActivity, android.R.layout.simple_spinner_item, profileNames).apply {
@@ -336,7 +346,8 @@ class NetworkDetailActivity : AppCompatActivity() {
             if (name.isNotEmpty() && ip.isNotEmpty()) {
                 lifecycleScope.launch {
                     try {
-                        val creds = supabaseRepository.getSshCredentials()
+                        val allCreds = supabaseRepository.getSshCredentials()
+                        val creds = allCreds.filter { it.isEnabled }
                         val selectedProfileIdx = sshSpinner.selectedItemPosition
                         val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
 
@@ -387,12 +398,15 @@ class NetworkDetailActivity : AppCompatActivity() {
         if (typeIndex != -1) typeSpinner.setSelection(typeIndex)
 
         lifecycleScope.launch {
-            val creds = supabaseRepository.getSshCredentials()
+            val allCreds = supabaseRepository.getSshCredentials()
+            val creds = allCreds.filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
                     sshSpinner.visibility = View.GONE
                 } else {
+                    txtNoCreds.visibility = View.GONE
+                    sshSpinner.visibility = View.VISIBLE
                     val profileNames = mutableListOf("None")
                     profileNames.addAll(creds.map { it.label })
                     sshSpinner.adapter = ArrayAdapter(this@NetworkDetailActivity, android.R.layout.simple_spinner_item, profileNames).apply {
@@ -410,7 +424,8 @@ class NetworkDetailActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             lifecycleScope.launch {
                 try {
-                    val creds = supabaseRepository.getSshCredentials()
+                    val allCreds = supabaseRepository.getSshCredentials()
+                    val creds = allCreds.filter { it.isEnabled }
                     val selectedProfileIdx = sshSpinner.selectedItemPosition
                     val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
 

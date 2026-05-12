@@ -18,6 +18,7 @@ class SshProfileAdapter(
         val txtUser: TextView = view.findViewById(R.id.txtProfileUsername)
         val btnEdit: ImageButton = view.findViewById(R.id.btnEditProfile)
         val btnDelete: ImageButton = view.findViewById(R.id.btnDeleteProfile)
+        val root: View = view
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -29,6 +30,17 @@ class SshProfileAdapter(
         val profile = profiles[position]
         holder.txtLabel.text = profile.label
         holder.txtUser.text = profile.sshUsername
+        
+        // UI Standard: If isEnabled is false, set card alpha to 0.5f
+        holder.root.alpha = if (profile.isEnabled) 1.0f else 0.5f
+        
+        // UI Protection: For "Fluxio Default", hide the Trash icon and use an "Action" icon for toggle
+        if (profile.label == "Fluxio Default") {
+            holder.btnDelete.setImageResource(android.R.drawable.ic_menu_view) // Action/Toggle icon
+        } else {
+            holder.btnDelete.setImageResource(android.R.drawable.ic_menu_delete)
+        }
+
         holder.btnEdit.setOnClickListener { onEdit(profile) }
         holder.btnDelete.setOnClickListener { onDelete(profile) }
     }

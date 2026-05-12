@@ -159,7 +159,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Step 5 Card (The most complex one) -->
+            <!-- Step 5 Card -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -184,7 +184,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Deploy the agent script on your PC to link it with the cloud database."
+                        android:text="Deploy the agent script on your PC to link it with the cloud database. Service and device monitor should start automatically."
                         android:textColor="@color/text_secondary"
                         android:layout_marginBottom="16dp" />
 
@@ -196,12 +196,12 @@
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
                         <Button
-                            android:id="@+id/btnDownloadWin"
+                            android:id="@+id/btnCopyWindowsScript"
                             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Windows Script"
+                            android:text="Windows Command"
                             android:textColor="@color/text_primary"
                             app:icon="@drawable/computer"
                             app:iconTint="@color/flux_neon_blue" />
@@ -222,12 +222,12 @@
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
                         <Button
-                            android:id="@+id/btnDownloadLinux"
+                            android:id="@+id/btnCopyLinuxScript"
                             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Linux Script"
+                            android:text="Linux Command"
                             android:textColor="@color/text_primary"
                             app:icon="@drawable/computer"
                             app:iconTint="@color/flux_neon_blue" />
@@ -248,12 +248,12 @@
                         android:orientation="horizontal"
                         android:layout_marginBottom="8dp">
                         <Button
-                            android:id="@+id/btnDownloadMac"
+                            android:id="@+id/btnCopyMacScript"
                             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="macOS Script"
+                            android:text="macOS Command"
                             android:textColor="@color/text_primary"
                             app:icon="@drawable/computer"
                             app:iconTint="@color/flux_neon_blue" />

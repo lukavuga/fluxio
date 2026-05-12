@@ -64,6 +64,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         }
 
         setContentView(R.layout.activity_main)
+        
+        // Initialize default SSH profile if it doesn't exist
+        lifecycleScope.launch {
+            if (supabaseRepository.ensureDefaultCredentialExists()) {
+                showFeedback("Default SSH profile initialized.")
+            }
+        }
+
         repository = NetworkRepository()
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
@@ -128,11 +136,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         setupSetupGuideHandlers()
 
-        val prefs = getSharedPreferences("fluxio_prefs", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("first_run", true)) {
-            showSetupGuide()
-        } else {
-            showCurrentNetwork()
+        if (!handleNavigationIntent(intent)) {
+            val prefs = getSharedPreferences("fluxio_prefs", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("first_run", true)) {
+                showSetupGuide()
+            } else {
+                showCurrentNetwork()
+            }
         }
 
         checkWifiConnection()
@@ -140,12 +150,46 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         observeSupabaseChanges()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateCheckedItem()
+    }
+
+    private fun handleNavigationIntent(intent: Intent?): Boolean {
+        val show = intent?.getStringExtra("SHOW_LAYOUT")
+        return when (show) {
+            "CURRENT" -> { showCurrentNetwork(); true }
+            "SAVED" -> { showSavedNetworks(); true }
+            "SETUP" -> { showSetupGuide(); true }
+            else -> false
+        }
+    }
+
+    private fun updateCheckedItem() {
+        val checkedId = when {
+            layoutCurrent.visibility == View.VISIBLE -> R.id.nav_current
+            layoutSaved.visibility == View.VISIBLE -> R.id.nav_saved
+            layoutSetup.visibility == View.VISIBLE -> R.id.nav_setup
+            else -> null
+        }
+        checkedId?.let { 
+            navView.setCheckedItem(it)
+            navView.menu.findItem(it)?.isChecked = true
+        }
+    }
+
     private fun showCurrentNetwork() {
         layoutCurrent.visibility = View.VISIBLE
         layoutSaved.visibility = View.GONE
         layoutSetup.visibility = View.GONE
         supportActionBar?.title = getString(R.string.title_current)
-        navView.setCheckedItem(R.id.nav_current)
+        updateCheckedItem()
     }
 
     private fun showSavedNetworks() {
@@ -153,7 +197,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         layoutSaved.visibility = View.VISIBLE
         layoutSetup.visibility = View.GONE
         supportActionBar?.title = getString(R.string.title_saved)
-        navView.setCheckedItem(R.id.nav_saved)
+        updateCheckedItem()
         loadSavedNetworks()
     }
 
@@ -162,11 +206,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         layoutSaved.visibility = View.GONE
         layoutSetup.visibility = View.VISIBLE
         supportActionBar?.title = "How to Setup"
-        navView.setCheckedItem(R.id.nav_setup)
+        updateCheckedItem()
     }
 
     private fun setupSetupGuideHandlers() {
-        val winScript = "powershell -ExecutionPolicy Bypass -Command \"iwr -useb https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_win.bat -OutFile f.bat; .\\\\f.bat\""
+        val winScript = "powershell -Command \"Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/lukavuga/fluxio/refs/heads/main/setup_fluxio.ps1'))\""
         val linuxScript = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_linux.sh | sudo bash"
         val macScript = "curl -sSL https://raw.githubusercontent.com/lukavuga/fluxio/main/fluxio_setup_mac.sh | zsh"
 
@@ -243,15 +287,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         showFeedback("Sending Shutdown command...")
                         val cred = supabaseRepository.getCredentialById(device.credentialId)
                         if (cred != null) {
-                            val decryptedPass = SecurityUtils.decrypt(cred.sshPassword)
-                            if (decryptedPass != null) {
-                                withContext(Dispatchers.IO) {
-                                    supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
-                                }
-                                showFeedback("Shutdown command sent via SSH")
-                            } else {
-                                showFeedback("Failed to decrypt SSH password")
+                            val decryptedPass = try {
+                                SecurityUtils.decrypt(cred.sshPassword) ?: cred.sshPassword
+                            } catch (e: Exception) {
+                                Log.e("Fluxio", "Decryption failed, using raw string")
+                                cred.sshPassword
                             }
+                            
+                            withContext(Dispatchers.IO) {
+                                supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                            }
+                            showFeedback("Shutdown command sent via SSH")
                         } else {
                             showFeedback("Linked SSH profile not found!")
                         }
@@ -296,17 +342,30 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
-        when (item.itemId) {
+        val itemId = item.itemId
+        
+        when (itemId) {
             R.id.nav_current -> showCurrentNetwork()
             R.id.nav_saved -> showSavedNetworks()
-            R.id.nav_ssh_profiles -> startActivity(Intent(this, SshProfilesActivity::class.java))
             R.id.nav_setup -> showSetupGuide()
-            R.id.nav_logout -> {
+            R.id.nav_ssh_profiles -> {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                // Start activity with a slight delay for better transition
                 lifecycleScope.launch {
+                    delay(200)
+                    startActivity(Intent(this@MainActivity, SshProfilesActivity::class.java))
+                }
+                return false // Don't check item here
+            }
+            R.id.nav_logout -> {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                lifecycleScope.launch {
+                    delay(200)
                     authRepository.signOut()
                     startActivity(Intent(this@MainActivity, LoginActivity::class.java))
                     finish()
                 }
+                return false
             }
         }
         drawerLayout.closeDrawer(GravityCompat.START)
@@ -561,7 +620,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         typeSpinner.setSelection(typeList.indexOf(currentType.uppercase()).coerceAtLeast(0))
 
         lifecycleScope.launch {
-            val creds = supabaseRepository.getSshCredentials()
+            val allCreds = supabaseRepository.getSshCredentials()
+            val creds = allCreds.filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
@@ -586,7 +646,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         btnSave.setOnClickListener {
             lifecycleScope.launch {
-                val creds = supabaseRepository.getSshCredentials()
+                val allCreds = supabaseRepository.getSshCredentials()
+                val creds = allCreds.filter { it.isEnabled }
                 val selectedProfileIdx = sshSpinner.selectedItemPosition
                 val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
                 
