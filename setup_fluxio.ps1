@@ -10,13 +10,13 @@ $FLUX_PASS = "fluxio_user"
 Write-Host "--- Fluxio System Setup ---" -ForegroundColor Cyan
 
 # 1. Ustvarjanje fluxio_user uporabnika
-Write-Host "[1/5] Creating dedicated Fluxio user..." -ForegroundColor White
 if (Get-LocalUser | Where-Object { $_.Name -eq $FLUX_USER }) {
     Write-Host "User already exists." -ForegroundColor Yellow
 } else {
     $Password = ConvertTo-SecureString $FLUX_PASS -AsPlainText -Force
-    New-LocalUser -Name $FLUX_USER -Password $Password -Description "Used for Fluxio SSH Shutdown" -PasswordNeverExpires $true
-    Add-LocalGroupMember -Group "Administrators" -Member $FLUX_USER # Potrebno za ukaz 'shutdown'
+    New-LocalUser -Name $FLUX_USER -Password $Password -Description "Fluxio SSH Account"
+    Set-LocalUser -Name $FLUX_USER -PasswordNeverExpires $true
+    Add-LocalGroupMember -Group "Administrators" -Member $FLUX_USER
     Write-Host "User created successfully." -ForegroundColor Green
 }
 
