@@ -59,7 +59,11 @@ try {
         "Prefer" = "resolution=merge-duplicates"  # TA VRSTICA JE NAJPOMEMBNEJŠA
     } -Body $Body
     Write-Host "SUCCESS: PC $env:COMPUTERNAME synced ($IP)." -ForegroundColor Green
-} catch {
-    $err = $_.Exception.Message
-    Write-Host "ERROR: Sync failed. Message: $err" -ForegroundColor Red
+} } catch {
+    # Ta del bo izpisal točno napako, ki jo vrne Supabase (npr. 401 Unauthorized ali 404)
+    $result = $_.Exception.Response.GetResponseStream()
+    $reader = New-Object System.IO.StreamReader($result)
+    $responseBody = $reader.ReadToEnd()
+    Write-Host "ERROR: Sync failed." -ForegroundColor Red
+    Write-Host "Server Response: $responseBody" -ForegroundColor Yellow
 }
