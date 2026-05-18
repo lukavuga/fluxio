@@ -1,5 +1,5 @@
 # ==============================================================================
-# FLUXIO DEPLOYMENT SCRIPT v2.1
+# FLUXIO DEPLOYMENT SCRIPT v2.1 (FINAL CLEAN VERSION)
 # ==============================================================================
 
 $URL = "https://vbpmfulxbpcuboirjokv.supabase.co/rest/v1/devices"
@@ -9,9 +9,10 @@ $FLUX_PASS = "fluxio_user"
 
 Write-Host "--- Fluxio System Setup v2.1 ---" -ForegroundColor Cyan
 
-# 1. Popravljeno ustvarjanje uporabnika (brez napak iz image_9b2790.png)
+# 1. User Creation
 Write-Host "[1/4] Configuring dedicated user..." -ForegroundColor White
-if (Get-LocalUser | Where-Object { $_.Name -eq $FLUX_USER }) {
+$existingUser = Get-LocalUser | Where-Object { $_.Name -eq $FLUX_USER }
+if ($existingUser) {
     Write-Host "User already exists." -ForegroundColor Yellow
 } else {
     $Password = ConvertTo-SecureString $FLUX_PASS -AsPlainText -Force
@@ -28,15 +29,18 @@ Start-Service sshd -ErrorAction SilentlyContinue
 Set-Service -Name sshd -StartupType 'Automatic'
 Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Set-NetAdapterPowerManagement -WakeOnMagicPacket Enabled -ErrorAction SilentlyContinue
 
-# 3. Varovanje SSH (AllowUsers)
+# 3. Secure SSH
 Write-Host "[3/4] Securing SSH..." -ForegroundColor White
 $sshdConfig = "$env:ProgramData\ssh\sshd_config"
-if ((Get-Content $sshdConfig) -notmatch "AllowUsers $FLUX_USER") {
-    Add-Content $sshdConfig "`nAllowUsers $FLUX_USER"
-    Restart-Service sshd
+if (Test-Path $sshdConfig) {
+    $configContent = Get-Content $sshdConfig
+    if ($configContent -notmatch "AllowUsers $FLUX_USER") {
+        Add-Content $sshdConfig "`nAllowUsers $FLUX_USER"
+        Restart-Service sshd
+    }
 }
 
-# 4. Sinhronizacija (UPSERT - deluje tudi brez predhodnega skeniranja)
+# 4. Cloud Sync (UPSERT)
 Write-Host "[4/4] Syncing with Cloud..." -ForegroundColor White
 $IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" -and $_.InterfaceAlias -notlike "*vEthernet*" -and $_.IPAddress -notlike "169.254.*" }).IPAddress[0]
 $MAC = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" }).MacAddress[0]
@@ -51,19 +55,14 @@ $Body = @{
 } | ConvertTo-Json
 
 try {
-    # UPORABI "Post" namesto "Patch" in dodaj "Prefer" glavo
     Invoke-RestMethod -Uri $URL -Method Post -Headers @{ 
         "apikey" = $API_KEY; 
         "Authorization" = "Bearer $API_KEY"; 
         "Content-Type" = "application/json";
-        "Prefer" = "resolution=merge-duplicates"  # TA VRSTICA JE NAJPOMEMBNEJŠA
+        "Prefer" = "resolution=merge-duplicates" 
     } -Body $Body
     Write-Host "SUCCESS: PC $env:COMPUTERNAME synced ($IP)." -ForegroundColor Green
-} } catch {
-    # Ta del bo izpisal točno napako, ki jo vrne Supabase (npr. 401 Unauthorized ali 404)
-    $result = $_.Exception.Response.GetResponseStream()
-    $reader = New-Object System.IO.StreamReader($result)
-    $responseBody = $reader.ReadToEnd()
+} catch {
     Write-Host "ERROR: Sync failed." -ForegroundColor Red
-    Write-Host "Server Response: $responseBody" -ForegroundColor Yellow
+    Write-Host "Message: $($_.Exception.Message)" -ForegroundColor Yellow
 }
