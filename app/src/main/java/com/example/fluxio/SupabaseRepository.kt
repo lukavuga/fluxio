@@ -4,11 +4,11 @@ import android.util.Log
 import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
-import io.github.jan.supabase.postgrest.query.upsert
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -61,6 +61,7 @@ data class SupabaseDevice(
     @Transient var originalName: String? = null
 )
 
+@OptIn(InternalSerializationApi::class)
 @Serializable
 private data class DeviceNetworkId(@SerialName("network_id") val networkId: String)
 
@@ -248,7 +249,10 @@ class SupabaseRepository {
             val result = client.from("networks").upsert(
                 value = SupabaseNetwork(name = name, userId = userId),
                 onConflict = "user_id,name"
-            ).decodeSingle<SupabaseNetwork>()
+            ) {
+                select()
+            }.decodeSingle<SupabaseNetwork>()
+
             networksCache = null
             result
         } catch (e: Exception) {
@@ -304,7 +308,7 @@ class SupabaseRepository {
             val deviceToUpsert = if (device.id.isNullOrBlank()) device.copy(id = null) else device
             client.from("devices").upsert(
                 value = deviceToUpsert,
-                onConflict = "network_id,ip_address"
+                onConflict = "mac_address" // SPREMENI IZ "network_id,ip_address" v "mac_address"
             )
             devicesCache.remove(device.networkId)
         } catch (e: Exception) {
@@ -329,31 +333,75 @@ class SupabaseRepository {
                 eq("id", deviceId)
             }
         }
-        devicesCache.clear() 
     }
 
-    suspend fun saveDevices(devices: List<SupabaseDevice>) = withContext(Dispatchers.IO) {
-        if (devices.isNotEmpty()) {
-            try {
-                val devicesToUpsert = devices.map { if (it.id.isNullOrBlank()) it.copy(id = null) else it }
-                client.from("devices").upsert(
-                    values = devicesToUpsert,
-                    onConflict = "network_id,ip_address"
-                )
-                devices.forEach { devicesCache.remove(it.networkId) }
-                networksCache = null
-            } catch (e: Exception) {
-                Log.e("Fluxio", "saveDevices (bulk) failed", e)
-                throw e
+    suspend fun deleteMultipleDevices(networkId: String, devices: List<SupabaseDevice>) = withContext(Dispatchers.IO) {
+        try {
+            val idsToDelete = devices.mapNotNull { it.id }
+            if (idsToDelete.isEmpty()) return@withContext
+            
+            client.from("devices").delete {
+                filter {
+                    isIn("id", idsToDelete)
+                }
+            }
+            devicesCache.remove(networkId)
+        } catch (e: Exception) {
+            Log.e("Fluxio", "deleteMultipleDevices failed", e)
+            throw e
+        }
+    }
+
+    suspend fun saveDevices(networkId: String, devices: List<SupabaseDevice>) = withContext(Dispatchers.IO) {
+        try {
+            if (devices.isEmpty()) return@withContext
+
+            val devicesToUpsert = devices.map { if (it.id.isNullOrBlank()) it.copy(id = null) else it }
+
+            // IZBOLJŠANA KODA:
+            client.from("devices").upsert(
+                values = devicesToUpsert,
+                onConflict = "mac_address" // Prepričaj se, da se ujema z bazo!
+            )
+            // Odstranili smo .decodeSingle(), ker upsert več naprav vrne seznam (Array).
+            // Če podatkov ne rabiš takoj v UI, je to najhitrejša rešitev.
+
+            devicesCache.remove(networkId)
+        } catch (e: Exception) {
+            Log.e("Fluxio", "saveDevices failed", e)
+            throw e
+        }
+    }
+
+    suspend fun upsertMultipleDevices(networkId: String, devices: List<SupabaseDevice>) = withContext(Dispatchers.IO) {
+        try {
+            if (devices.isEmpty()) return@withContext
+            val devicesToUpsert = devices.map { if (it.id.isNullOrBlank()) it.copy(id = null) else it }
+
+
+            client.from("devices").upsert(
+                value = devicesToUpsert,
+                onConflict = "mac_address"
+            )
+            devicesCache.remove(networkId)
+        } catch (e: Exception) {
+            Log.e("Fluxio", "upsertMultipleDevices failed", e)
+            throw e
+        }
+    }
+
+    fun observeDeviceChanges(networkId: String? = null): Flow<SupabaseDevice> {
+        val channel = client.channel(networkId?.let { "devices_$it" } ?: "devices_all")
+
+        return channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = "devices"
+            networkId?.let { filter("network_id", FilterOperator.EQ, it) }
+        }.mapNotNull { action ->
+            when (action) {
+                is PostgresAction.Update -> action.decodeRecord<SupabaseDevice>()
+                is PostgresAction.Insert -> action.decodeRecord<SupabaseDevice>()
+                else -> null
             }
         }
-    }
-
-    fun observeDeviceChanges(channelName: String = "devices"): Flow<SupabaseDevice> {
-        val myChannel = client.channel(channelName)
-        val changes = myChannel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
-            table = "devices"
-        }
-        return changes.mapNotNull { it.decodeRecord<SupabaseDevice>() }
     }
 }

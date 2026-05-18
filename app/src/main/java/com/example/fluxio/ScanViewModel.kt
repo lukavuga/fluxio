@@ -25,7 +25,7 @@ class ScanViewModel(
                 }
 
                 // Batch insert using Supabase Postgrest
-                supabaseRepository.saveDevices(devicesToSave)
+                supabaseRepository.saveDevices(networkUuid, devicesToSave)
 
                 _uiState.value = ScanUiState.Success("Successfully registered ${devicesToSave.size} devices.")
             } catch (e: Exception) {

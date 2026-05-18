@@ -418,7 +418,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     macAddress = it.macAddress?.uppercase()
                 ) 
             }
-            supabaseRepository.saveDevices(devicesToSave)
+            supabaseRepository.saveDevices(createdNetworkId!!, devicesToSave)
 
             withContext(Dispatchers.Main) {
                 showFeedback("Network '$name' saved successfully!")
