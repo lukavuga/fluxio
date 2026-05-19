@@ -30,13 +30,16 @@ class SshProfilesActivity : AppCompatActivity(), NavigationView.OnNavigationItem
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var navView: NavigationView
     private lateinit var adapter: SshProfileAdapter
-    private val supabaseRepository = SupabaseRepository()
-    private val authRepository = AuthRepository(SupabaseInstance.client)
+    private lateinit var supabaseRepository: SupabaseRepository
+    private lateinit var authRepository: AuthRepository
     private lateinit var txtNoProfiles: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_ssh_profiles)
+
+        authRepository = AuthRepository(this, SupabaseInstance.client)
+        supabaseRepository = SupabaseRepository(this)
 
         val toolbar = findViewById<Toolbar>(R.id.toolbarSsh)
         setSupportActionBar(toolbar)

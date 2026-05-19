@@ -1,6 +1,5 @@
 package com.example.fluxio
 
-import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -17,14 +16,14 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
-import com.jcraft.jsch.JSch
-import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.Inet4Address
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -34,7 +33,7 @@ class NetworkDetailActivity : AppCompatActivity() {
     private lateinit var networkName: String
     private lateinit var adapter: DeviceAdapter
     private lateinit var swipeRefresh: SwipeRefreshLayout
-    private val supabaseRepository = SupabaseRepository()
+    private lateinit var supabaseRepository: SupabaseRepository
     private val networkRepository = NetworkRepository()
     
     private var existingDevices = mutableListOf<SupabaseDevice>()
@@ -42,6 +41,8 @@ class NetworkDetailActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_network_detail)
+
+        supabaseRepository = SupabaseRepository(this)
 
         networkId = intent.getStringExtra("NETWORK_ID") ?: ""
         networkName = intent.getStringExtra("NETWORK_NAME") ?: "Network Details"
@@ -125,7 +126,13 @@ class NetworkDetailActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     adapter.updateList(devices)
                 }
-                checkStatusInBackground(devices)
+                
+                // Use the robust Socket Ping check
+                if (!isRealInternetAvailable()) {
+                    showFeedback("Viewing offline data")
+                } else {
+                    checkStatusInBackground(devices)
+                }
             } catch (e: Exception) {
                 Log.e("Fluxio", "Error loading devices", e)
                 withContext(Dispatchers.Main) {
@@ -138,8 +145,9 @@ class NetworkDetailActivity : AppCompatActivity() {
     private fun observeChanges() {
         lifecycleScope.launch {
             try {
-                supabaseRepository.observeDeviceChanges().collect { device ->
-                    if (device.networkId == networkId) {
+                // Use the robust Socket Ping check
+                if (isRealInternetAvailable()) {
+                    supabaseRepository.observeDeviceChanges(networkId).collect { device ->
                         withContext(Dispatchers.Main) {
                             adapter.addOrUpdateDevice(device)
                             val index = existingDevices.indexOfFirst { it.ipAddress == device.ipAddress }
@@ -184,7 +192,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                 val myIp = withContext(Dispatchers.IO) { getLocalIpAddress() }
                 if (myIp == null) {
                     withContext(Dispatchers.Main) {
-                        showFeedback("No Wi-Fi connection")
+                        showFeedback("No connection detected")
                         swipeRefresh.isRefreshing = false
                     }
                     return@launch
@@ -229,7 +237,6 @@ class NetworkDetailActivity : AppCompatActivity() {
                     showFeedback(message)
                 }
             } catch (e: Exception) {
-                Log.e("Fluxio", "Scan crash prevented", e)
                 withContext(Dispatchers.Main) {
                     swipeRefresh.isRefreshing = false
                     showFeedback("Scan failed: ${e.message}")
@@ -254,8 +261,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                             val decryptedPass = try {
                                 SecurityUtils.decrypt(cred.sshPassword) ?: cred.sshPassword
                             } catch (e: Exception) {
-                                Log.e("Fluxio", "Decryption failed for profile: ${cred.label}. Falling back to raw string.")
-                                cred.sshPassword // Use the raw string if decryption fails
+                                cred.sshPassword 
                             }
                             
                             withContext(Dispatchers.IO) {
@@ -263,7 +269,7 @@ class NetworkDetailActivity : AppCompatActivity() {
                                     supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
                                 } catch (e: Exception) {
                                     withContext(Dispatchers.Main) {
-                                        showFeedback("SSH command failed. Ensure PC is running the Fluxio Agent.")
+                                        showFeedback("SSH command failed. Check agent connection.")
                                     }
                                 }
                             }
@@ -273,7 +279,9 @@ class NetworkDetailActivity : AppCompatActivity() {
                     }
                 } else {
                     device.macAddress?.let {
-                        WakeOnLan.sendMagicPacket(it)
+                        withContext(Dispatchers.IO) {
+                            WakeOnLan.sendMagicPacket(it)
+                        }
                         showFeedback("WOL Magic Packet sent")
                         delay(2000)
                         performStreamingRescan()
@@ -316,8 +324,7 @@ class NetworkDetailActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
-            val allCreds = supabaseRepository.getSshCredentials()
-            val creds = allCreds.filter { it.isEnabled }
+            val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
@@ -346,14 +353,13 @@ class NetworkDetailActivity : AppCompatActivity() {
             if (name.isNotEmpty() && ip.isNotEmpty()) {
                 lifecycleScope.launch {
                     try {
-                        val allCreds = supabaseRepository.getSshCredentials()
-                        val creds = allCreds.filter { it.isEnabled }
+                        val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
                         val selectedProfileIdx = sshSpinner.selectedItemPosition
                         val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
 
                         val device = SupabaseDevice(
                             networkId = networkId,
-                            name = name,
+                            label = name,
                             ipAddress = ip,
                             macAddress = mac.ifBlank { null },
                             credentialId = credId,
@@ -386,7 +392,7 @@ class NetworkDetailActivity : AppCompatActivity() {
         val btnSave = dialogView.findViewById<Button>(R.id.btnSaveChanges)
         val btnClose = dialogView.findViewById<Button>(R.id.btnCloseDialog)
 
-        editName.setText(device.name)
+        editName.setText(device.label)
         editIp.setText(device.ipAddress)
         editMac.setText(device.macAddress)
 
@@ -398,8 +404,7 @@ class NetworkDetailActivity : AppCompatActivity() {
         if (typeIndex != -1) typeSpinner.setSelection(typeIndex)
 
         lifecycleScope.launch {
-            val allCreds = supabaseRepository.getSshCredentials()
-            val creds = allCreds.filter { it.isEnabled }
+            val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
@@ -424,13 +429,12 @@ class NetworkDetailActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             lifecycleScope.launch {
                 try {
-                    val allCreds = supabaseRepository.getSshCredentials()
-                    val creds = allCreds.filter { it.isEnabled }
+                    val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
                     val selectedProfileIdx = sshSpinner.selectedItemPosition
                     val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
 
                     val updated = device.copy(
-                        name = editName.text.toString().trim(),
+                        label = editName.text.toString().trim(),
                         ipAddress = editIp.text.toString().trim(),
                         macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
                         credentialId = credId,
@@ -449,7 +453,7 @@ class NetworkDetailActivity : AppCompatActivity() {
         btnDelete.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Delete Device")
-                .setMessage("Are you sure you want to delete ${device.name}?")
+                .setMessage("Are you sure you want to delete ${device.label}?")
                 .setPositiveButton("Delete") { _, _ ->
                     lifecycleScope.launch {
                         try {
@@ -469,21 +473,10 @@ class NetworkDetailActivity : AppCompatActivity() {
     }
 
     private fun getLocalIpAddress(): String? {
-        try {
-            val en = NetworkInterface.getNetworkInterfaces()
-            while (en.hasMoreElements()) {
-                val intf = en.nextElement()
-                val enumIpAddr = intf.inetAddresses
-                while (enumIpAddr.hasMoreElements()) {
-                    val inetAddress = enumIpAddr.nextElement()
-                    if (!inetAddress.isLoopbackAddress && inetAddress is Inet4Address) {
-                        return inetAddress.hostAddress
-                    }
-                }
-            }
-        } catch (ex: Exception) {
-            Log.e("Fluxio", "IP lookup failed", ex)
-        }
-        return null
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val link = cm.getLinkProperties(cm.activeNetwork)
+        return link?.linkAddresses?.firstOrNull {
+            it.address is Inet4Address && !it.address.isLoopbackAddress
+        }?.address?.hostAddress
     }
 }

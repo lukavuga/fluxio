@@ -4,28 +4,32 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
 import com.example.fluxio.databinding.ActivityLoginBinding
 import com.google.android.material.snackbar.Snackbar
-import kotlinx.coroutines.launch
 
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityLoginBinding
-    private val authRepository = AuthRepository(SupabaseInstance.client)
+    private val viewModel: LoginViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Check if already logged in (handles offline entry if flag set)
+        if (viewModel.isUserLoggedIn()) {
+            navigateToMain()
+        }
+
         binding.btnLogin.setOnClickListener {
             val email = binding.emailInput.text.toString().trim()
             val password = binding.passwordInput.text.toString()
 
             if (email.isNotEmpty() && password.isNotEmpty()) {
-                login(email, password)
+                viewModel.login(email, password)
             } else {
                 showFeedback("Please fill in all fields")
             }
@@ -34,24 +38,29 @@ class LoginActivity : AppCompatActivity() {
         binding.txtRegister.setOnClickListener {
             startActivity(Intent(this, RegisterActivity::class.java))
         }
+
+        observeViewModel()
     }
 
-    private fun login(email: String, password: String) {
-        binding.progressBar.visibility = View.VISIBLE
-        binding.btnLogin.isEnabled = false
+    private fun observeViewModel() {
+        viewModel.isLoading.observe(this) { isLoading ->
+            binding.progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+            binding.btnLogin.isEnabled = !isLoading
+        }
 
-        lifecycleScope.launch {
-            try {
-                authRepository.signIn(email, password)
-                startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                finish()
-            } catch (e: Exception) {
-                showFeedback("Login failed: ${e.message}")
-            } finally {
-                binding.progressBar.visibility = View.GONE
-                binding.btnLogin.isEnabled = true
+        viewModel.loginResult.observe(this) { result ->
+            if (result.isSuccess) {
+                navigateToMain()
+            } else {
+                val error = result.exceptionOrNull()?.message ?: "Login failed"
+                showFeedback(error)
             }
         }
+    }
+
+    private fun navigateToMain() {
+        startActivity(Intent(this, MainActivity::class.java))
+        finish()
     }
 
     private fun showFeedback(message: String) {

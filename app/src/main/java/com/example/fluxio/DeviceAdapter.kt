@@ -73,7 +73,7 @@ class DeviceAdapter(
             val typeName = (device.deviceType ?: device.type)?.uppercase() ?: "PC"
             val statusLabel = device.status ?: "Offline"
 
-            deviceName.text = device.name
+            deviceName.text = device.label
             deviceIp.text = device.ipAddress
             
             val formattedMac = device.macAddress?.uppercase() ?: "Unknown"

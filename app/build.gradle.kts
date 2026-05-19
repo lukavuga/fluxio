@@ -52,7 +52,13 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    // --- SSH (Legacy, might be removed later) ---
+    // --- ROOM DATABASE ---
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
+
+    // --- SSH ---
     implementation(libs.jsch)
 
     // --- WORK MANAGER ---
@@ -65,4 +71,7 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.ktor.client.android)
     implementation(libs.kotlinx.serialization.json)
+
+    // --- SETTINGS (Fix for Type Mismatch in Supabase Auth Persistence) ---
+    implementation("com.russhwolf:multiplatform-settings-no-arg:1.1.1")
 }

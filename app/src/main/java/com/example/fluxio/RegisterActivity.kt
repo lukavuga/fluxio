@@ -12,12 +12,14 @@ import kotlinx.coroutines.launch
 class RegisterActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRegisterBinding
-    private val authRepository = AuthRepository(SupabaseInstance.client)
+    private lateinit var authRepository: AuthRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        authRepository = AuthRepository(this, SupabaseInstance.client)
 
         binding.btnRegister.setOnClickListener {
             val email = binding.emailInput.text.toString().trim()
@@ -53,9 +55,7 @@ class RegisterActivity : AppCompatActivity() {
             
             if (result.isSuccess) {
                 showFeedback("Registration successful! Please check your email for verification.")
-                // Note: Not finishing immediately so user can see the snackbar, 
-                // but usually success snacks are better on the login screen.
-                // However, following prompt's "standardize all feedback".
+                // User can now go back to login
             } else {
                 val exception = result.exceptionOrNull()
                 showFeedback("Registration failed: ${exception?.message}")

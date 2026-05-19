@@ -3,8 +3,6 @@ package com.example.fluxio
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.util.Log
 import android.view.GestureDetector
@@ -48,8 +46,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var swipeRefreshMain: SwipeRefreshLayout
 
     private lateinit var repository: NetworkRepository
-    private val supabaseRepository = SupabaseRepository()
-    private val authRepository = AuthRepository(SupabaseInstance.client)
+    private lateinit var supabaseRepository: SupabaseRepository
+    private lateinit var authRepository: AuthRepository
     
     private val currentScanResults = mutableListOf<SupabaseDevice>()
     private lateinit var currentDeviceAdapter: DeviceAdapter
@@ -57,6 +55,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        supabaseRepository = SupabaseRepository(this)
+        authRepository = AuthRepository(this, SupabaseInstance.client)
+
         if (!authRepository.isUserLoggedIn()) {
             startActivity(Intent(this, LoginActivity::class.java))
             finish()
@@ -65,14 +66,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         setContentView(R.layout.activity_main)
         
-        // Initialize default SSH profile if it doesn't exist
+        repository = NetworkRepository()
+
         lifecycleScope.launch {
-            if (supabaseRepository.ensureDefaultCredentialExists()) {
-                showFeedback("Default SSH profile initialized.")
+            if (isRealInternetAvailable()) {
+                if (supabaseRepository.ensureDefaultCredentialExists()) {
+                    showFeedback("Default SSH profile initialized.")
+                }
+            } else {
+                showFeedback("Working in Offline Mode")
             }
         }
-
-        repository = NetworkRepository()
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
@@ -145,8 +149,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
         }
 
-        checkWifiConnection()
-        checkConnectivity()
         observeSupabaseChanges()
     }
 
@@ -228,12 +230,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private fun observeSupabaseChanges() {
         lifecycleScope.launch {
             try {
-                supabaseRepository.observeDeviceChanges().collect { supabaseDevice ->
-                    val scanIndex = currentScanResults.indexOfFirst { it.ipAddress == supabaseDevice.ipAddress }
-                    if (scanIndex != -1) {
-                        currentScanResults[scanIndex] = supabaseDevice
-                        withContext(Dispatchers.Main) {
-                            currentDeviceAdapter.addOrUpdateDevice(supabaseDevice)
+                if (isRealInternetAvailable()) {
+                    supabaseRepository.observeDeviceChanges().collect { supabaseDevice ->
+                        val scanIndex = currentScanResults.indexOfFirst { it.ipAddress == supabaseDevice.ipAddress }
+                        if (scanIndex != -1) {
+                            currentScanResults[scanIndex] = supabaseDevice
+                            withContext(Dispatchers.Main) {
+                                currentDeviceAdapter.addOrUpdateDevice(supabaseDevice)
+                            }
                         }
                     }
                 }
@@ -248,26 +252,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val clip = android.content.ClipData.newPlainText("Fluxio Setup", text)
         cm.setPrimaryClip(clip)
         showFeedback(label)
-    }
-
-    private fun checkConnectivity() {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = cm.activeNetwork
-        val caps = cm.getNetworkCapabilities(activeNetwork)
-        val isConnected = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        if (!isConnected) {
-            showFeedback("No internet connection")
-        }
-    }
-
-    private fun checkWifiConnection() {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = cm.activeNetwork
-        val caps = cm.getNetworkCapabilities(activeNetwork)
-        val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-        if (!isWifi) {
-            showFeedback(getString(R.string.no_wifi))
-        }
     }
 
     private fun handlePowerControl(device: SupabaseDevice) {
@@ -290,12 +274,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             val decryptedPass = try {
                                 SecurityUtils.decrypt(cred.sshPassword) ?: cred.sshPassword
                             } catch (e: Exception) {
-                                Log.e("Fluxio", "Decryption failed, using raw string")
                                 cred.sshPassword
                             }
                             
                             withContext(Dispatchers.IO) {
-                                supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                                try {
+                                    supabaseRepository.executeSshCommand(device.ipAddress, cred.sshUsername, decryptedPass, "shutdown /s /t 0")
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        showFeedback("SSH command failed. Check agent connection.")
+                                    }
+                                }
                             }
                             showFeedback("Shutdown command sent via SSH")
                         } else {
@@ -307,7 +296,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                         showFeedback("Missing MAC address! Run setup script on the PC.")
                     } else {
                         showFeedback("Sending Magic Packet...")
-                        WakeOnLan.sendMagicPacket(device.macAddress!!)
+                        withContext(Dispatchers.IO) {
+                            WakeOnLan.sendMagicPacket(device.macAddress!!)
+                        }
                         delay(3000)
                         startSmartScan() 
                     }
@@ -342,20 +333,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     override fun onNavigationItemSelected(item: MenuItem): Boolean {
-        val itemId = item.itemId
-        
-        when (itemId) {
+        when (item.itemId) {
             R.id.nav_current -> showCurrentNetwork()
             R.id.nav_saved -> showSavedNetworks()
             R.id.nav_setup -> showSetupGuide()
             R.id.nav_ssh_profiles -> {
                 drawerLayout.closeDrawer(GravityCompat.START)
-                // Start activity with a slight delay for better transition
                 lifecycleScope.launch {
                     delay(200)
                     startActivity(Intent(this@MainActivity, SshProfilesActivity::class.java))
                 }
-                return false // Don't check item here
+                return false
             }
             R.id.nav_logout -> {
                 drawerLayout.closeDrawer(GravityCompat.START)
@@ -383,7 +371,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .setMessage(getString(R.string.enter_network_name))
             .setView(input)
             .setPositiveButton(getString(R.string.save)) { _, _ ->
-                val name = input.text.toString()
+                val name = input.text.toString().trim()
                 if (name.isNotEmpty()) {
                     lifecycleScope.launch {
                         try {
@@ -391,7 +379,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                             if (networks.any { it.name.equals(name, ignoreCase = true) }) {
                                 showFeedback("Name already exists!")
                             } else {
-                                saveNetworkToSupabase(name)
+                                saveFullNetwork(name)
                             }
                         } catch (e: Exception) {
                             showFeedback("Error checking networks")
@@ -403,22 +391,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             .show()
     }
 
-    private suspend fun saveNetworkToSupabase(name: String) {
-        var createdNetworkId: String? = null
+    private suspend fun saveFullNetwork(name: String) {
         try {
-            val user = authRepository.getCurrentUser() ?: return
-            
-            val network = supabaseRepository.upsertNetwork(name, user.id)
-            createdNetworkId = network.id ?: throw Exception("Failed to retrieve Network ID")
-
-            val devicesToSave = currentScanResults.map { 
-                it.copy(
-                    networkId = createdNetworkId!!, 
-                    originalName = null,
-                    macAddress = it.macAddress?.uppercase()
-                ) 
-            }
-            supabaseRepository.saveDevices(createdNetworkId!!, devicesToSave)
+            val devicesToSave = currentScanResults.toList()
+            supabaseRepository.saveFullNetwork(name, devicesToSave)
 
             withContext(Dispatchers.Main) {
                 showFeedback("Network '$name' saved successfully!")
@@ -427,12 +403,8 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 currentDeviceAdapter.updateList(emptyList())
             }
         } catch (e: Exception) {
-            try {
-                createdNetworkId?.let { supabaseRepository.deleteNetwork(it) }
-            } catch (_: Exception) {}
-
             withContext(Dispatchers.Main) {
-                Log.e("Fluxio", "Critical Save Error: ${e.stackTraceToString()}")
+                Log.e("Fluxio", "Save Error", e)
                 showFeedback("Error saving: ${e.message}")
             }
         }
@@ -550,7 +522,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     showFeedback(getString(R.string.scan_finished))
                 }
             } catch (e: Exception) {
-                Log.e("Fluxio", "Main scan crash prevented", e)
                 withContext(Dispatchers.Main) {
                     progressContainer.visibility = View.GONE
                     swipeRefreshMain.isRefreshing = false
@@ -562,7 +533,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun getLocalIpAddress(): String? {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
         val link = cm.getLinkProperties(cm.activeNetwork)
         return link?.linkAddresses?.firstOrNull {
             it.address is Inet4Address && !it.address.isLoopbackAddress
@@ -607,7 +578,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         val btnClose = dialogView.findViewById<Button>(R.id.btnCloseDialog)
         val btnSave = dialogView.findViewById<Button>(R.id.btnSaveChanges)
         
-        editName.setText(device.name)
+        editName.setText(device.label)
         editIp.setText(device.ipAddress)
         editIp.isEnabled = false
         editMac.setText(device.macAddress ?: "")
@@ -620,8 +591,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         typeSpinner.setSelection(typeList.indexOf(currentType.uppercase()).coerceAtLeast(0))
 
         lifecycleScope.launch {
-            val allCreds = supabaseRepository.getSshCredentials()
-            val creds = allCreds.filter { it.isEnabled }
+            val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
             withContext(Dispatchers.Main) {
                 if (creds.isEmpty()) {
                     txtNoCreds.visibility = View.VISIBLE
@@ -646,13 +616,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         btnSave.setOnClickListener {
             lifecycleScope.launch {
-                val allCreds = supabaseRepository.getSshCredentials()
-                val creds = allCreds.filter { it.isEnabled }
+                val creds = supabaseRepository.getSshCredentials().filter { it.isEnabled }
                 val selectedProfileIdx = sshSpinner.selectedItemPosition
                 val credId = if (selectedProfileIdx > 0) creds[selectedProfileIdx - 1].id else null
                 
                 val updated = device.copy(
-                    name = editName.text.toString().trim(),
+                    label = editName.text.toString().trim(),
                     macAddress = editMac.text.toString().trim().uppercase().ifBlank { null },
                     credentialId = credId,
                     deviceType = typeSpinner.selectedItem.toString(),
